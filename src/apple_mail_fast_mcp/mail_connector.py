@@ -67,6 +67,15 @@ from .utils import (
 # OSError covers socket.timeout too. ValueError and MailAccountNotFoundError
 # are deliberately NOT in this tuple — they indicate caller/config errors
 # and must surface, not be papered over by fallback.
+#
+# UnicodeEncodeError IS included (even though it subclasses ValueError) as a
+# safety net for non-ASCII SEARCH terms: the IMAP path now sends UTF-8 search
+# criteria under an explicit CHARSET (see ImapConnector.search_messages), but
+# if any criterion still reaches imaplib's default us-ascii encoder it raises
+# UnicodeEncodeError *before* the request leaves the process. That used to
+# surface to the caller as a validation_error with no fallback; routing it
+# here means a Korean/CJK keyword search degrades gracefully to AppleScript
+# instead of failing outright.
 _IMAP_FALLBACK_EXCS: tuple[type[Exception], ...] = (
     MailKeychainEntryNotFoundError,
     MailKeychainAccessDeniedError,
@@ -75,6 +84,7 @@ _IMAP_FALLBACK_EXCS: tuple[type[Exception], ...] = (
     IMAPClientError,
     MailImapMoveUnsupportedError,
     MailImapTrashNotFoundError,
+    UnicodeEncodeError,
 )
 
 logger = logging.getLogger(__name__)
@@ -439,6 +449,36 @@ def _filter_imap_results_to_cutoff(
 # in well under a second; sustained >5s suggests the user is hitting the
 # AppleScript fallback against a mailbox where IMAP would help.
 _SLOW_SEARCH_THRESHOLD_SEC = 5.0
+
+
+def _message_id_match_clause(message_id: str) -> str:
+    """Build an AppleScript boolean (for a ``whose`` filter) that matches a
+    message by EITHER Mail's numeric ``id`` OR its RFC 5322 ``message id``
+    (bare or bracketed).
+
+    This is the cross-path bridge for issue F2: read tools on the IMAP path
+    return ``id`` = the RFC 5322 Message-ID (bracketless), while the
+    AppleScript path returns Mail's internal numeric id. Accepting both forms
+    lets a caller pipe an id from either path into any AppleScript-backed
+    lookup (save_attachments, get_thread anchor, …) without knowing which
+    path produced it.
+
+    The numeric ``id`` branch is included ONLY when the input is all-digits:
+    comparing Mail's integer ``id`` against a non-numeric string raises inside
+    a ``whose`` filter and aborts the entire match — the bug that made
+    IMAP-sourced ids report "Message not found".
+    """
+    raw = sanitize_input(message_id)
+    bare = raw[1:-1] if raw.startswith("<") and raw.endswith(">") else raw
+    bare_safe = escape_applescript_string(bare)
+    brk_safe = escape_applescript_string(f"<{bare}>")
+    clauses = [
+        f'message id is "{bare_safe}"',
+        f'message id is "{brk_safe}"',
+    ]
+    if bare.isdigit():
+        clauses.insert(0, f"id is {bare}")
+    return " or ".join(clauses)
 
 
 # MCP-tool field name → Mail.app AppleScript `rule type` enum identifier.
@@ -2196,7 +2236,10 @@ class AppleMailConnector:
         with a known account+mailbox should provide them to take the
         IMAP path instead.
         """
-        message_id_safe = escape_applescript_string(sanitize_input(message_id))
+        # Accept either the numeric AppleScript id or the RFC Message-ID that
+        # the IMAP read path emits, so a search-result id resolves regardless
+        # of which path produced it (issue F2).
+        id_match_clause = _message_id_match_clause(message_id)
 
         content_clause = (
             'set msgContent to content of msg'
@@ -2223,7 +2266,7 @@ class AppleMailConnector:
             repeat with acc in accounts
                 repeat with mb in mailboxes of acc
                     try
-                        set msg to first message of mb whose id is "{message_id_safe}"
+                        set msg to first message of mb whose ({id_match_clause})
                         {content_clause}
 {attachments_clause}
                         set resultData to {{|id|:(id of msg as text), |rfc_message_id|:(message id of msg), |subject|:(subject of msg), |sender|:(sender of msg), |date_received|:(date received of msg as text), |read_status|:(read status of msg), |flagged|:(flagged status of msg), |content|:msgContent{attachments_field}}}
@@ -2546,14 +2589,16 @@ class AppleMailConnector:
         ``dest_path`` via Mail.app's ``save`` command. Factored out so the
         byte-read path is unit-testable without a real Mail.app save.
         """
-        message_id_safe = escape_applescript_string(sanitize_input(message_id))
+        # Accept either the numeric AppleScript id or the RFC Message-ID from
+        # the IMAP read path so a search-result id resolves either way (F2).
+        id_match_clause = _message_id_match_clause(message_id)
         dest_safe = escape_applescript_string(str(dest_path))
         script = _wrap_with_timeout(
             f"""tell application "Mail"
             repeat with acc in accounts
                 repeat with mb in mailboxes of acc
                     try
-                        set msg to first message of mb whose id is "{message_id_safe}"
+                        set msg to first message of mb whose ({id_match_clause})
                         set theAtts to mail attachments of msg
                         save (item {one_based_index} of theAtts) in (POSIX file "{dest_safe}")
                         return "OK"
@@ -2587,7 +2632,9 @@ class AppleMailConnector:
         Callers with a known account+mailbox should provide them to take
         the IMAP path instead.
         """
-        message_id_safe = escape_applescript_string(sanitize_input(message_id))
+        # Accept either the numeric AppleScript id or the RFC Message-ID from
+        # the IMAP read path so a search-result id resolves either way (F2).
+        id_match_clause = _message_id_match_clause(message_id)
 
         tell_body = f'''
         tell application "Mail"
@@ -2595,7 +2642,7 @@ class AppleMailConnector:
             repeat with acc in accounts
                 repeat with mb in mailboxes of acc
                     try
-                        set msg to first message of mb whose id is "{message_id_safe}"
+                        set msg to first message of mb whose ({id_match_clause})
                         set attList to mail attachments of msg
 
                         set resultData to {{}}
@@ -3119,14 +3166,17 @@ class AppleMailConnector:
         """
         from .utils import parse_rfc822_ids
 
-        message_id_safe = escape_applescript_string(sanitize_input(message_id))
+        # Accept either the numeric AppleScript id or the RFC Message-ID that
+        # the IMAP read path emits, so get_thread can anchor on a search
+        # result id regardless of which path produced it (issue F2).
+        id_match_clause = _message_id_match_clause(message_id)
         anchor_body = f'''
         tell application "Mail"
             set anchorResult to missing value
             repeat with acc in accounts
                 repeat with mb in mailboxes of acc
                     try
-                        set msg to first message of mb whose id is "{message_id_safe}"
+                        set msg to first message of mb whose ({id_match_clause})
                         set anchorInReplyTo to ""
                         set anchorRefs to ""
                         try
@@ -3392,7 +3442,13 @@ class AppleMailConnector:
         if not targets:
             return {"saved": 0, "rejected": rejected}
 
-        message_id_safe = escape_applescript_string(sanitize_input(message_id))
+        # Accept BOTH id spaces so a row from the IMAP search path pipes
+        # straight in (issue F2): the IMAP path returns `id` = the RFC 5322
+        # Message-ID (bracketless), while the AppleScript path returns Mail's
+        # internal numeric id. Match on either `id` (numeric) or `message id`
+        # (RFC, bare or bracketed) in one `whose` clause so the caller never
+        # has to know which path produced the id.
+        id_match_clause = _message_id_match_clause(message_id)
         idx_list = ", ".join(str(idx) for idx, _ in targets)
         path_list = ", ".join(
             f'"{escape_applescript_string(str(path))}"' for _, path in targets
@@ -3404,7 +3460,7 @@ class AppleMailConnector:
             repeat with acc in accounts
                 repeat with mb in mailboxes of acc
                     try
-                        set msg to first message of mb whose id is "{message_id_safe}"
+                        set msg to first message of mb whose ({id_match_clause})
                         set theAtts to mail attachments of msg
                         set idxList to {{{idx_list}}}
                         set pathList to {{{path_list}}}

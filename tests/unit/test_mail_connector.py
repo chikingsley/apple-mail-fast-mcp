@@ -1299,6 +1299,35 @@ class TestAppleMailConnector:
         imap_path.assert_not_called()
         as_path.assert_called_once()
 
+    def test_search_messages_falls_back_on_unicode_encode_error(
+        self, connector: AppleMailConnector
+    ) -> None:
+        """F1 safety net: if the IMAP path raises UnicodeEncodeError (a
+        non-ASCII term that reached imaplib's default us-ascii encoder),
+        search_messages must degrade to AppleScript rather than surfacing
+        the error to the caller as a validation_error with no results.
+
+        The charset fix in ImapConnector.search_messages should prevent
+        this in practice, but defense-in-depth keeps a Korean/CJK keyword
+        search working even if some path still encodes as ASCII."""
+        boom = UnicodeEncodeError(
+            "ascii", "안내", 0, 2, "ordinal not in range(128)"
+        )
+        with patch.object(
+            connector, "_imap_search", side_effect=boom
+        ) as imap_path, patch.object(
+            connector, "_search_messages_applescript",
+            return_value=[{"id": "1"}],
+        ) as as_path:
+            result = connector.search_messages(
+                "iCloud", "INBOX", body_contains="안내"
+            )
+        imap_path.assert_called_once()
+        as_path.assert_called_once()
+        assert result == [{"id": "1"}]
+        # The failure also opens the circuit breaker for this account.
+        assert "iCloud" in connector._imap_failure_until
+
     def test_successful_imap_call_clears_breaker_via_search(
         self, connector: AppleMailConnector
     ) -> None:
@@ -4183,10 +4212,12 @@ class TestAppleMailConnector:
         # All record keys must be |quoted| per the v0.4.1 selector-collision rule.
         assert "|rfc_message_id|:(message id of msg)" in anchor_script
         assert "|subject|:(subject of msg)" in anchor_script
-        # Anchor lookup iterates by internal id; id must be wrapped in
-        # AppleScript string quotes (otherwise UUID-style ids tokenize
-        # as invalid syntax — see TestWhoseIdQuoting).
-        assert 'whose id is "12345"' in anchor_script
+        # Anchor lookup now matches either the numeric `id` or the RFC
+        # `message id` (F2 cross-path piping). A numeric input keeps the
+        # integer `id` branch (unquoted, valid AppleScript), and the RFC
+        # branch is always present so an IMAP-sourced Message-ID resolves.
+        assert "id is 12345" in anchor_script
+        assert 'message id is "12345"' in anchor_script
 
     @patch.object(AppleMailConnector, "_run_applescript")
     def test_get_thread_anchor_not_found_raises(
@@ -4768,7 +4799,12 @@ class TestWhoseIdQuoting:
         uuid_id = "CF7C3761-C190-40BA-B94E-3EBC321980ED@icloud.com"
         connector.get_message(uuid_id, include_content=False)
         script = mock_run.call_args[0][0]
-        assert f'whose id is "{uuid_id}"' in script
+        # The clause now matches either the numeric `id` or the RFC `message
+        # id` (F2 cross-path piping), but a non-numeric id must still appear
+        # quoted inside the `whose` filter (injection safety — the original
+        # intent of #86 / this test).
+        assert f'message id is "{uuid_id}"' in script
+        assert f'message id is "<{uuid_id}>"' in script
 
     @patch.object(AppleMailConnector, "_run_applescript")
     def test_get_attachments_quotes_id_in_whose(
@@ -4778,7 +4814,8 @@ class TestWhoseIdQuoting:
         uuid_id = "CF7C3761-C190-40BA-B94E-3EBC321980ED@icloud.com"
         connector.get_attachments(uuid_id)
         script = mock_run.call_args[0][0]
-        assert f'whose id is "{uuid_id}"' in script
+        assert f'message id is "{uuid_id}"' in script
+        assert f'message id is "<{uuid_id}>"' in script
 
     @patch.object(AppleMailConnector, "_run_applescript")
     def test_save_attachments_quotes_id_in_whose(
@@ -4792,11 +4829,19 @@ class TestWhoseIdQuoting:
         with tempfile.TemporaryDirectory() as td:
             connector.save_attachments(uuid_id, Path(td))
         # Multiple AppleScript calls may happen; check at least one
-        # contained the quoted-id pattern.
+        # contained the quoted-id pattern. The clause now matches either the
+        # numeric `id` or the RFC `message id` (F2 cross-path piping), but the
+        # id must still appear quoted inside the `whose` filter (injection
+        # safety — the original intent of this test).
         scripts = [c[0][0] for c in mock_run.call_args_list]
-        assert any(f'whose id is "{uuid_id}"' in s for s in scripts), (
+        assert any(f'message id is "{uuid_id}"' in s for s in scripts), (
             f"expected quoted id in one of the scripts: {scripts}"
         )
+        # And the RFC message-id branch (bracketed form) must be present so an
+        # IMAP-sourced id resolves without a numeric-id round-trip.
+        assert any(
+            f'message id is "<{uuid_id}>"' in s for s in scripts
+        ), f"expected message-id branch in one of the scripts: {scripts}"
 
 
 class TestUpdateMessageMatchesRfcMessageId:
