@@ -1391,7 +1391,7 @@ class TestGetMessages:
         assert result["success"] is True
         assert result["count"] == 1
         assert result["messages"][0]["id"] == "1"
-        # All six params flow through per id; include_attachments defaults
+        # All params flow through per id; include_attachments defaults
         # True for get_messages (bounded id-list cardinality, see #133+#142).
         mock_mail.get_message.assert_called_once_with(
             "1",
@@ -1400,6 +1400,7 @@ class TestGetMessages:
             account=None,
             mailbox=None,
             include_attachments=True,
+            body_format="text",
         )
         mock_logger.log_operation.assert_called_once()
 
@@ -1611,6 +1612,7 @@ class TestGetMessages:
             account="iCloud",
             mailbox="INBOX",
             include_attachments=True,
+            body_format="text",
         )
 
     # ---- include_attachments (#133 + #142) -------------------------------

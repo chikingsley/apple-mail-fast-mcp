@@ -790,6 +790,7 @@ def _resolve_id_list_to_messages(
     mailbox: str | None,
     headers_only: bool = False,
     include_attachments: bool = False,
+    body_format: str = "text",
 ) -> list[dict[str, Any]]:
     """Resolve a mixed list of ids and ``SELECTED`` tokens to message dicts.
 
@@ -823,6 +824,7 @@ def _resolve_id_list_to_messages(
                     account=account,
                     mailbox=mailbox,
                     include_attachments=include_attachments,
+                    body_format=body_format,
                 )
                 out.append(msg)
             except MailMessageNotFoundError:
@@ -1210,6 +1212,7 @@ def get_messages(
     account: str | None = None,
     mailbox: str | None = None,
     include_attachments: bool = True,
+    body_format: str = "text",
 ) -> dict[str, Any]:
     """
     Get full details of one or more messages, with bodies.
@@ -1239,10 +1242,20 @@ def get_messages(
             Bounded cost — id-list cardinality is typically 1-10. Free on
             the IMAP fast path; cheap-enough on the AppleScript fallback
             for typical id counts.
+        body_format: ``"text"`` (default) returns ``content`` as decoded,
+            human-readable body text only — attachment bytes are stripped
+            (their metadata still appears via ``include_attachments``). This
+            keeps a message carrying a multi-MB attachment from inflating
+            ``content`` into megabytes of inlined base64 that overflow the
+            result. ``"raw"`` restores the legacy IMAP behavior (``content``
+            is the undecoded MIME body with attachments inlined) — an escape
+            hatch you should rarely need. AppleScript-path content is already
+            plain text and is unaffected by this flag.
 
     Returns:
         Dictionary containing the list of messages and count. Each message
-        body is bounded to 1 MB of UTF-8 text (override via
+        includes ``to`` and ``cc`` (recipient strings) on the IMAP path.
+        Each message body is bounded to 1 MB of UTF-8 text (override via
         ``APPLE_MAIL_MCP_MAX_BODY_BYTES``) and scrubbed of transport-hostile
         characters so a large or malformed body can't crash the server
         (#365). When a body is truncated, the message carries
@@ -1282,6 +1295,7 @@ def get_messages(
             mailbox=mailbox,
             headers_only=headers_only,
             include_attachments=include_attachments,
+            body_format=body_format,
         )
 
         operation_logger.log_operation(

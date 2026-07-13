@@ -3692,6 +3692,7 @@ class TestAppleMailConnector:
             include_content=True,
             headers_only=False,
             include_attachments=False,
+            body_format="text",
         )
         as_path.assert_not_called()
 
