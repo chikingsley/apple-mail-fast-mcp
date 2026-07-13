@@ -3390,6 +3390,31 @@ class TestCreateDraftTool:
         mock_mail.create_draft.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_connector_safety_error_maps_to_safety_violation(
+        self,
+        isolated_drafts: Any,
+        mock_mail: MagicMock,
+        mock_logger: MagicMock,
+        mock_ctx_accept: MagicMock,
+    ) -> None:
+        """#322/#175: the SMTP send path's transport-boundary guard raises
+        MailSafetyError for a derived non-reserved recipient the server-layer
+        gate never saw; the server surfaces it as a safety_violation, not a
+        generic ``unknown`` error."""
+        from apple_mail_fast_mcp.exceptions import MailSafetyError
+        from apple_mail_fast_mcp.server import create_draft
+
+        mock_mail.create_draft.side_effect = MailSafetyError(
+            "Test mode: recipients must use RFC 2606 reserved domains"
+        )
+        result = await create_draft(
+            to=["ok@example.com"], subject="hi", body="x",
+            send_now=True, ctx=mock_ctx_accept,
+        )
+        assert result["success"] is False
+        assert result["error_type"] == "safety_violation"
+
+    @pytest.mark.asyncio
     async def test_send_now_missing_ctx_blocks_with_confirmation_required(
         self,
         isolated_drafts: Any,

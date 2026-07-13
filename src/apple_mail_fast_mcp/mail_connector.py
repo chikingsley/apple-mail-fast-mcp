@@ -4,6 +4,7 @@ AppleScript-based connector for Apple Mail.
 
 import logging
 import re
+import smtplib
 import subprocess
 import tempfile
 import time
@@ -44,12 +45,16 @@ from .exceptions import (
     MailMailboxNotFoundError,
     MailMessageNotFoundError,
     MailRuleNotFoundError,
+    MailSafetyError,
     MailUnsupportedGmailSystemLabelError,
     MailUnsupportedRuleActionError,
 )
 from .imap_connector import ImapConnectionPool, ImapConnector
 from .imap_overrides import get_login_override
+from .imap_providers import detect_provider
 from .keychain import get_imap_password
+from .security import send_recipients_test_violation
+from .smtp_sender import SmtpSender
 from .utils import (
     applescript_account_clause,
     escape_applescript_string,
@@ -85,6 +90,21 @@ _IMAP_FALLBACK_EXCS: tuple[type[Exception], ...] = (
     MailImapMoveUnsupportedError,
     MailImapTrashNotFoundError,
     UnicodeEncodeError,
+)
+
+# Exceptions that trigger AppleScript fallback for the clean SMTP send path
+# (issue #322). Mirrors _IMAP_FALLBACK_EXCS: Keychain opt-out and connection
+# failures degrade gracefully to `tell theMessage to send`. OSError covers
+# socket errors / timeouts; smtplib.SMTPException covers auth and protocol
+# failures. MailAccountNotFoundError / ValueError are deliberately excluded —
+# they are caller/config errors that must surface. MailSafetyError is also
+# excluded on purpose: a test-mode reserved-domain violation must HARD-FAIL,
+# never fall back to an equally-unsafe AppleScript send (#322/#175).
+_SMTP_FALLBACK_EXCS: tuple[type[Exception], ...] = (
+    MailKeychainEntryNotFoundError,
+    MailKeychainAccessDeniedError,
+    OSError,
+    smtplib.SMTPException,
 )
 
 logger = logging.getLogger(__name__)
@@ -4803,25 +4823,54 @@ class AppleMailConnector:
         password = self._get_imap_password_with_fallback(from_account, email)
         imap = ImapConnector(host, port, email, password, pool=self._imap_pool)
 
-        raw = imap.fetch_raw_message(seed_id, seed_mailbox)
-        orig = parse_original_message(raw)
+        message_id, draft_raw, _recipients = self._build_reply_forward_mime(
+            imap=imap,
+            seed=seed,
+            seed_id=seed_id,
+            seed_mailbox=seed_mailbox,
+            sender=sender,
+            self_email=email,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=subject,
+            body=body,
+            reply_all=reply_all,
+            attachment_paths=attachment_paths,
+        )
+        imap.append_draft(draft_raw)
+        self._imap_clear_breaker(from_account)
+        return {"draft_id": _bare_message_id(message_id), "sent_message_id": ""}
 
-        # Threading: In-Reply-To = the original's Message-ID; References =
-        # the original's References chain plus the original's Message-ID.
-        in_reply_to = orig.message_id or None
-        references = list(orig.references)
-        if orig.message_id and orig.message_id not in references:
-            references.append(orig.message_id)
+    def _resolve_reply_forward_fields(
+        self,
+        *,
+        seed: str,
+        orig: Any,
+        self_email: str,
+        to: list[str] | None,
+        cc: list[str] | None,
+        subject: str | None,
+        body: str,
+        reply_all: bool,
+    ) -> tuple[list[str], list[str] | None, str | None, str, Any]:
+        """Derive the final (to, cc, subject, body, forwarded_attachments)
+        for a clean reply/forward from the parsed original.
 
-        final_to: list[str]
-        final_cc: list[str] | None
+        For ``seed="reply"`` recipients are derived from the original's
+        headers (reply-all minus self) unless the caller overrode them;
+        for ``seed="forward"`` the original's attachments are carried over.
+        Extracted from the reply/forward builders so each stays under the
+        complexity ceiling and so the draft (APPEND) and send (SMTP) paths
+        derive recipients identically.
+        """
         if seed == "reply":
             derived_to, derived_cc = derive_reply_recipients(
                 from_header=orig.from_header,
                 reply_to_header=orig.reply_to_header,
                 to_header=orig.to_header,
                 cc_header=orig.cc_header,
-                self_addresses=[email],
+                self_addresses=[self_email],
                 reply_all=reply_all,
             )
             final_to = to if to is not None else derived_to
@@ -4835,22 +4884,80 @@ class AppleMailConnector:
                 original_date=orig.date,
                 original_text=orig.text,
             )
-            forwarded_attachments = None
-        else:  # forward
-            final_to = to if to is not None else []
-            final_cc = cc
-            final_subject = (
-                subject if subject is not None else forward_subject(orig.subject)
-            )
-            final_body = build_forward_body(
-                new_body=body,
-                original_from=orig.from_header,
-                original_date=orig.date,
-                original_subject=orig.subject,
-                original_to=orig.to_header,
-                original_text=orig.text,
-            )
-            forwarded_attachments = orig.attachments or None
+            return final_to, final_cc, final_subject, final_body, None
+
+        final_to = to if to is not None else []
+        final_subject = (
+            subject if subject is not None else forward_subject(orig.subject)
+        )
+        final_body = build_forward_body(
+            new_body=body,
+            original_from=orig.from_header,
+            original_date=orig.date,
+            original_subject=orig.subject,
+            original_to=orig.to_header,
+            original_text=orig.text,
+        )
+        return final_to, cc, final_subject, final_body, orig.attachments or None
+
+    def _build_reply_forward_mime(
+        self,
+        *,
+        imap: ImapConnector,
+        seed: str,
+        seed_id: str,
+        seed_mailbox: str,
+        sender: str,
+        self_email: str,
+        to: list[str] | None,
+        cc: list[str] | None,
+        bcc: list[str] | None,
+        subject: str | None,
+        body: str,
+        reply_all: bool,
+        attachment_paths: list[Path] | None,
+    ) -> tuple[str, bytes, list[str]]:
+        """Fetch the original over IMAP, rebuild a clean (no cite-blockquote)
+        reply/forward MIME with threading headers, and return
+        ``(message_id, raw_bytes, envelope_recipients)``.
+
+        ``envelope_recipients`` is the fully-resolved ``to + cc + bcc`` set
+        actually addressed. Reply/forward recipient *derivation* happens here,
+        so this is the only point at which the true recipient list is known —
+        which is exactly why the SMTP send path runs its test-mode
+        reserved-domain guard against this value, not the caller-supplied one
+        (#322/#175).
+
+        Shared by the draft path (``_create_reply_forward_draft_via_imap``,
+        which then APPENDs) and the send path
+        (``_send_reply_forward_via_smtp``, which then submits via SMTP).
+        """
+        raw = imap.fetch_raw_message(seed_id, seed_mailbox)
+        orig = parse_original_message(raw)
+
+        # Threading: In-Reply-To = the original's Message-ID; References =
+        # the original's References chain plus the original's Message-ID.
+        in_reply_to = orig.message_id or None
+        references = list(orig.references)
+        if orig.message_id and orig.message_id not in references:
+            references.append(orig.message_id)
+
+        (
+            final_to,
+            final_cc,
+            final_subject,
+            final_body,
+            forwarded_attachments,
+        ) = self._resolve_reply_forward_fields(
+            seed=seed,
+            orig=orig,
+            self_email=self_email,
+            to=to,
+            cc=cc,
+            subject=subject,
+            body=body,
+            reply_all=reply_all,
+        )
 
         message_id, draft_raw = build_draft_mime(
             sender=sender,
@@ -4866,9 +4973,8 @@ class AppleMailConnector:
             references=references or None,
             forwarded_attachments=forwarded_attachments,
         )
-        imap.append_draft(draft_raw)
-        self._imap_clear_breaker(from_account)
-        return {"draft_id": _bare_message_id(message_id), "sent_message_id": ""}
+        recipients = list(final_to) + list(final_cc or []) + list(bcc or [])
+        return message_id, draft_raw, recipients
 
     def _try_imap_compose_draft(
         self,
@@ -4973,6 +5079,433 @@ class AppleMailConnector:
             self._log_imap_fallback(from_account, exc)
         return None
 
+    def _query_smtp_server(self, account: str) -> tuple[str, int]:
+        """Query Mail.app for an account's outgoing (SMTP) server host/port.
+
+        Returns ``("", 0)`` when the account has no SMTP server configured
+        (e.g. a receive-only / mid-configuration account), which the caller
+        treats as "SMTP unavailable — fall back to AppleScript". Mirrors
+        ``_resolve_imap_config``'s Mail.app-property discovery (#322).
+
+        Raises:
+            MailAccountNotFoundError: If the account doesn't exist.
+        """
+        account_clause = applescript_account_clause(account)
+        tell_body = f"""
+        tell application "Mail"
+            set acctRef to {account_clause}
+            set smtpRef to smtp server of acctRef
+            if smtpRef is missing value then
+                set resultData to {{|host|:"", |port|:0}}
+            else
+                set smtpHost to server name of smtpRef
+                if smtpHost is missing value then set smtpHost to ""
+                set smtpPort to port of smtpRef
+                if smtpPort is missing value then set smtpPort to 0
+                set resultData to {{|host|:smtpHost, |port|:smtpPort}}
+            end if
+        end tell
+        """
+        script = _wrap_as_json_script(tell_body, timeout=self.timeout)
+        raw = self._run_applescript(script)
+        try:
+            parsed = parse_applescript_json(raw)
+        except ValueError:
+            # Unparseable Mail.app output — treat as "SMTP not discoverable"
+            # and let the caller fall back to AppleScript rather than crashing
+            # the send.
+            return "", 0
+        if not isinstance(parsed, dict):
+            # Unexpected shape from Mail.app — same graceful degradation. A
+            # real AppleScript error (account not found, permission) has
+            # already raised in `_run_applescript` before reaching here.
+            return "", 0
+        host = cast(str, parsed.get("host") or "")
+        port = cast(int, parsed.get("port") or 0)
+        return host, port
+
+    def _resolve_smtp_config(self, account: str) -> tuple[str, int, str]:
+        """Resolve ``(smtp_host, smtp_port, login_email)`` for an account.
+
+        SMTP host/port come from Mail.app's ``smtp server`` object; the login
+        email reuses ``_resolve_imap_config``'s identity resolution (custom-
+        domain / third-party-Apple-ID handling — #201/#299/#341) because the
+        SMTP AUTH user and the IMAP LOGIN user are the same app-password-backed
+        credential for every provider we support. A missing/zero SMTP port
+        defaults to ``587`` (STARTTLS submission). An empty host signals "not
+        configured" to the caller (#322).
+
+        Raises:
+            MailAccountNotFoundError: If the account doesn't exist.
+        """
+        host, port = self._query_smtp_server(account)
+        if not host:
+            # No SMTP server configured — signal "unavailable" without a
+            # further (and pointless) IMAP-config round-trip.
+            return "", 0, ""
+        _imap_host, _imap_port, email = self._resolve_imap_config(account)
+        if port == 0:
+            port = 587
+        return host, port, email
+
+    def _smtp_send(
+        self,
+        from_account: str,
+        raw_message: bytes,
+        recipients: list[str],
+        *,
+        smtp_config: tuple[str, int, str],
+    ) -> None:
+        """Enforce the test-mode reserved-domain guard, then submit
+        ``raw_message`` over SMTP (issue #322).
+
+        The reserved-domain guard runs *here*, at the transport boundary,
+        where the final envelope recipient set is known — closing the #175
+        gap for send paths that derive recipients inside the connector (an
+        SMTP ``reply_all`` whose ``cc`` is pulled from the original message).
+        A violation raises ``MailSafetyError``, which is deliberately NOT in
+        ``_SMTP_FALLBACK_EXCS``, so an unsafe send hard-fails instead of
+        silently falling back to an equally-unsafe AppleScript send.
+
+        Raises:
+            MailSafetyError: A recipient is not on a reserved test domain
+                while ``MAIL_TEST_MODE`` is set.
+            OSError / smtplib.SMTPException: Connection / SMTP failures (the
+                caller catches these to fall back to AppleScript).
+        """
+        violation = send_recipients_test_violation(recipients)
+        if violation:
+            raise MailSafetyError(violation)
+        host, port, login_email = smtp_config
+        password = self._get_imap_password_with_fallback(from_account, login_email)
+        SmtpSender(host, port, login_email, password, timeout=self.timeout).send(
+            raw_message, recipients
+        )
+
+    def _send_new_via_smtp(
+        self,
+        *,
+        from_account: str,
+        to: list[str],
+        cc: list[str] | None,
+        bcc: list[str] | None,
+        subject: str,
+        body: str,
+        attachment_paths: list[Path] | None,
+        smtp_config: tuple[str, int, str],
+    ) -> dict[str, str]:
+        """Build a clean fresh-compose RFC 822 message and SMTP-send it
+        (issue #322 — the ``seed="new"`` send analog of the #246 draft path).
+        """
+        sender = self._resolve_account_to_sender(from_account)
+        _message_id, raw = build_draft_mime(
+            sender=sender,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=subject,
+            body=body,
+            attachments=(
+                [Path(p) for p in attachment_paths] if attachment_paths else None
+            ),
+        )
+        recipients = list(to) + list(cc or []) + list(bcc or [])
+        self._smtp_send(from_account, raw, recipients, smtp_config=smtp_config)
+        self._imap_clear_breaker(from_account)
+        self._save_sent_copy(
+            from_account, raw, answered=False, smtp_config=smtp_config
+        )
+        return {"draft_id": "", "sent_message_id": ""}
+
+    def _send_reply_forward_via_smtp(
+        self,
+        *,
+        seed: str,
+        seed_id: str,
+        seed_mailbox: str,
+        from_account: str,
+        to: list[str] | None,
+        cc: list[str] | None,
+        bcc: list[str] | None,
+        subject: str | None,
+        body: str,
+        reply_all: bool,
+        attachment_paths: list[Path] | None,
+        smtp_config: tuple[str, int, str],
+    ) -> dict[str, str]:
+        """Rebuild a clean reply/forward from the original (fetched over IMAP)
+        and SMTP-send it (issue #322 — the send analog of the #292 draft
+        path). Recipient derivation and the transport-boundary safety guard
+        both run against the fully-resolved recipient set."""
+        sender = self._resolve_account_to_sender(from_account)
+        host, port, email = self._resolve_imap_config(from_account)
+        password = self._get_imap_password_with_fallback(from_account, email)
+        imap = ImapConnector(host, port, email, password, pool=self._imap_pool)
+        _message_id, raw, recipients = self._build_reply_forward_mime(
+            imap=imap,
+            seed=seed,
+            seed_id=seed_id,
+            seed_mailbox=seed_mailbox,
+            sender=sender,
+            self_email=email,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=subject,
+            body=body,
+            reply_all=reply_all,
+            attachment_paths=attachment_paths,
+        )
+        self._smtp_send(from_account, raw, recipients, smtp_config=smtp_config)
+        self._imap_clear_breaker(from_account)
+        # Reuse the connector already built for the original fetch — a reply
+        # carries \\Answered in Sent.
+        self._save_sent_copy(
+            from_account,
+            raw,
+            answered=(seed == "reply"),
+            smtp_config=smtp_config,
+            imap=imap,
+        )
+        return {"draft_id": "", "sent_message_id": ""}
+
+    def _save_sent_copy(
+        self,
+        from_account: str,
+        raw_message: bytes,
+        *,
+        answered: bool,
+        smtp_config: tuple[str, int, str],
+        imap: ImapConnector | None = None,
+    ) -> None:
+        """Best-effort: APPEND a copy of a just-SMTP-sent message to the
+        account's Sent folder over IMAP (issue #406).
+
+        The SMTP send path (#322) submits directly via ``smtplib`` and so
+        loses the Sent-mailbox copy that Mail.app's AppleScript ``tell
+        theMessage to send`` used to save as a side effect. This restores it,
+        reusing the IMAP-APPEND infrastructure of the clean draft path
+        (#245/#246/#292) via :meth:`ImapConnector.append_sent_copy`.
+
+        Provider exception (PR #404 re-review): a few providers — Gmail among
+        the ones we support — already auto-file a copy of SMTP-submitted mail
+        into Sent *server-side*. Appending our own copy there produces a
+        duplicate, so for a provider flagged ``smtp_saves_sent_copy`` we skip
+        the APPEND entirely. The provider is detected from ``smtp_config``
+        (the SMTP host / login), independent of the reused ``imap`` connector.
+        This was confirmed live against a Gmail account during the review: one
+        SMTP submission with no APPEND of our own still produced exactly one
+        Sent copy.
+
+        Failure boundary (deliberate): by the time this runs the message has
+        already been accepted by the server and delivered to the recipient —
+        the send has *succeeded*. Any failure here (no Sent folder, IMAP
+        error, missing Keychain opt-in) is therefore logged and swallowed,
+        never raised. In particular it must never propagate into
+        :meth:`_try_smtp_send`'s fallback ``except`` clauses, because that
+        would drop through to the AppleScript ``tell theMessage to send`` path
+        and deliver a *second* copy — the exact duplicate-send class of bug
+        fixed for QUIT teardown in PR #404. Catching ``Exception`` broadly is
+        the intent: nothing about saving a courtesy copy may affect the send
+        outcome the caller already committed to.
+
+        Args:
+            from_account: Mail.app account whose Sent folder receives the copy.
+            raw_message: The exact bytes submitted over SMTP (still carrying
+                any ``Bcc`` header, which the Sent copy legitimately records).
+            answered: True when the sent message was a reply (adds
+                ``\\Answered`` to the Sent copy).
+            smtp_config: ``(smtp_host, port, login_email)`` for the account —
+                used to detect providers that auto-save Sent copies (see
+                above) so the APPEND can be skipped for them.
+            imap: An existing connector for ``from_account`` to reuse (the
+                reply/forward path already built one to fetch the original);
+                ``None`` means build one from the account's resolved config.
+        """
+        smtp_host, _port, login_email = smtp_config
+        if detect_provider(smtp_host, login_email).smtp_saves_sent_copy:
+            logger.debug(
+                "Skipping Sent-copy APPEND for %r: provider auto-saves "
+                "SMTP-submitted mail to Sent server-side (an APPEND would "
+                "duplicate it). (#406)",
+                from_account,
+            )
+            return
+        try:
+            if imap is None:
+                host, port, email = self._resolve_imap_config(from_account)
+                password = self._get_imap_password_with_fallback(
+                    from_account, email
+                )
+                imap = ImapConnector(
+                    host, port, email, password, pool=self._imap_pool
+                )
+            folder = imap.append_sent_copy(raw_message, answered=answered)
+            logger.debug(
+                "Saved Sent copy to %r for account %r", folder, from_account
+            )
+        except Exception as exc:  # best-effort — must never fail the send
+            logger.warning(
+                "SMTP send for account %r succeeded but saving a "
+                "Sent-mailbox copy failed; the message was delivered, so not "
+                "retrying (a retry could duplicate the send). Cause: %s",
+                from_account,
+                exc,
+                exc_info=True,
+            )
+
+    def _try_clean_create_or_send(
+        self,
+        *,
+        seed: str,
+        seed_id: str | None,
+        seed_mailbox: str | None,
+        send_now: bool,
+        effective_account: str | None,
+        to: list[str] | None,
+        cc: list[str] | None,
+        bcc: list[str] | None,
+        subject: str | None,
+        body: str,
+        body_html: str | None,
+        reply_all: bool,
+        attachment_paths: list[Path] | None,
+    ) -> dict[str, str] | None:
+        """Try the clean, wrapper-free paths in order and return the first
+        that engages, or ``None`` to fall through to AppleScript.
+
+        - save-as-draft → IMAP APPEND (#245), then poke Mail.app to sync so
+          the draft surfaces locally (#269);
+        - ``send_now`` → SMTP submit (#322).
+
+        Both avoid Mail.app's AppleScript ``content`` setter and its
+        FB11734014 cite-blockquote. Extracted from ``create_draft`` so that
+        method stays under the complexity ceiling.
+        """
+        imap_result = self._try_imap_draft_paths(
+            seed=seed,
+            seed_id=seed_id,
+            seed_mailbox=seed_mailbox,
+            send_now=send_now,
+            effective_account=effective_account,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=subject,
+            body=body,
+            body_html=body_html,
+            reply_all=reply_all,
+            attachment_paths=attachment_paths,
+        )
+        if imap_result is not None:
+            imap_result.setdefault("from_account", effective_account or "")
+            self._sync_account_drafts(effective_account)
+            return imap_result
+
+        # `_effective_from_account` deliberately does NOT auto-resolve an
+        # implicit account for send_now (#321), so an implicit-account send
+        # stays on the AppleScript path — pass `from_account` for clean SMTP.
+        smtp_result = self._try_smtp_send(
+            seed=seed,
+            seed_id=seed_id,
+            seed_mailbox=seed_mailbox,
+            send_now=send_now,
+            from_account=effective_account,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=subject,
+            body=body,
+            reply_all=reply_all,
+            attachment_paths=attachment_paths,
+        )
+        if smtp_result is not None:
+            smtp_result.setdefault("from_account", effective_account or "")
+            return smtp_result
+        return None
+
+    def _try_smtp_send(
+        self,
+        *,
+        seed: str,
+        seed_id: str | None,
+        seed_mailbox: str | None,
+        send_now: bool,
+        from_account: str | None,
+        to: list[str] | None,
+        cc: list[str] | None,
+        bcc: list[str] | None,
+        subject: str | None,
+        body: str,
+        reply_all: bool,
+        attachment_paths: list[Path] | None,
+    ) -> dict[str, str] | None:
+        """Clean SMTP send path for ``send_now=True`` (issue #322).
+
+        Submits a wrapper-free RFC 822 message over SMTP instead of Mail.app's
+        AppleScript ``tell theMessage to send`` (whose ``content`` setter
+        applies the FB11734014 cite-blockquote to sent mail). Returns the
+        send-result dict when it handles the request, or ``None`` to fall
+        through to the AppleScript send path.
+
+        Engages only for ``send_now`` with a known account, no open circuit
+        breaker, and a configured SMTP server. On the usual degradation
+        signals (SMTP not configured, no Keychain opt-in, network/protocol
+        failure, or a reply/forward folder-guess miss) it logs and returns
+        ``None``. A test-mode reserved-domain violation is NOT a degradation
+        signal — it propagates as ``MailSafetyError`` (#322/#175).
+        """
+        if not (
+            send_now
+            and from_account is not None
+            and not self._imap_breaker_open(from_account)
+        ):
+            return None
+        is_compose = seed == "new"
+        is_reply_forward = (
+            seed in ("reply", "forward")
+            and seed_id is not None
+            and "@" in seed_id
+        )
+        if not (is_compose or is_reply_forward):
+            return None
+        try:
+            smtp_config = self._resolve_smtp_config(from_account)
+            if not smtp_config[0]:
+                return None  # No SMTP server configured — fall through.
+            if is_compose:
+                return self._send_new_via_smtp(
+                    from_account=from_account,
+                    to=to or [],
+                    cc=cc,
+                    bcc=bcc,
+                    subject=subject or "",
+                    body=body,
+                    attachment_paths=attachment_paths,
+                    smtp_config=smtp_config,
+                )
+            return self._send_reply_forward_via_smtp(
+                seed=seed,
+                seed_id=cast(str, seed_id),
+                seed_mailbox=seed_mailbox or "INBOX",
+                from_account=from_account,
+                to=to,
+                cc=cc,
+                bcc=bcc,
+                subject=subject,
+                body=body,
+                reply_all=reply_all,
+                attachment_paths=attachment_paths,
+                smtp_config=smtp_config,
+            )
+        except _SMTP_FALLBACK_EXCS as exc:
+            self._log_imap_fallback(from_account, exc)
+        except MailMessageNotFoundError as exc:
+            # Original not in seed_mailbox (or wrong folder hint) — the
+            # AppleScript send path resolves the seed across all folders.
+            self._log_imap_fallback(from_account, exc)
+        return None
+
     def create_draft(
         self,
         *,
@@ -5007,8 +5540,18 @@ class AppleMailConnector:
         ``Fwd:`` subject + ``In-Reply-To``/``References`` threading are
         rebuilt in plain text (forwards carry the original's attachments).
         Falls back to AppleScript when IMAP isn't configured or the
-        original isn't in ``seed_mailbox``. ``send_now=True`` still uses
-        AppleScript.
+        original isn't in ``seed_mailbox``.
+
+        ``send_now=True`` takes the clean SMTP send path (issue #322): a
+        wrapper-free RFC 822 message (built by the same ``build_draft_mime``)
+        is submitted over the account's SMTP server, so sent mail no longer
+        carries the cite-blockquote wrapper either. It engages when the
+        account has SMTP + IMAP credentials configured, and falls back to the
+        AppleScript ``tell theMessage to send`` path (which does apply the
+        wrapper) when SMTP isn't available. In test mode
+        (``MAIL_TEST_MODE``) the SMTP path re-checks every resolved recipient
+        against the reserved-domain allowlist at the transport boundary and
+        raises ``MailSafetyError`` on a violation (#175).
 
         After an IMAP-path APPEND the account is synchronized so the draft
         appears in Mail.app's local Drafts pane promptly rather than after
@@ -5071,10 +5614,11 @@ class AppleMailConnector:
         # sender anyway, so the From is unchanged).
         effective_account = self._effective_from_account(from_account, send_now)
 
-        # Clean IMAP-APPEND paths (issue #245) avoid Mail.app's
-        # cite-blockquote wrapper (bug FB11734014); they return a draft
-        # dict, or None to fall through to AppleScript.
-        imap_result = self._try_imap_draft_paths(
+        # Clean (wrapper-free) paths that avoid Mail.app's cite-blockquote
+        # (bug FB11734014): IMAP-APPEND for save-as-draft (#245), SMTP submit
+        # for send_now (#322). Returns a result dict, or None to fall through
+        # to the AppleScript path below.
+        clean_result = self._try_clean_create_or_send(
             seed=seed,
             seed_id=seed_id,
             seed_mailbox=seed_mailbox,
@@ -5089,13 +5633,8 @@ class AppleMailConnector:
             reply_all=reply_all,
             attachment_paths=attachment_paths,
         )
-        if imap_result is not None:
-            imap_result.setdefault("from_account", effective_account or "")
-            # The draft is now on the server, but Mail.app doesn't poll
-            # Drafts on its own — nudge it to sync so the draft surfaces in
-            # the local UI promptly. (#269)
-            self._sync_account_drafts(effective_account)
-            return imap_result
+        if clean_result is not None:
+            return clean_result
 
         # HTML drafts exist only on the clean IMAP path (Mail.app's
         # AppleScript `content` setter is plain-text only). If the IMAP path

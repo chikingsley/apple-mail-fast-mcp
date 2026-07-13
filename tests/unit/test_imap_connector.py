@@ -3595,6 +3595,100 @@ class TestAppendDraft:
         assert mock_client.append.call_args[0][0] == "Drafts"
 
 
+class TestAppendSentCopy:
+    """#406: after an SMTP send (#322), a copy is APPENDed to the account's
+    Sent folder over IMAP (Mail.app's AppleScript send used to do this as a
+    side effect). Mirrors TestAppendDraft: SPECIAL-USE first, conventional
+    fallback, plus the \\Seen / \\Answered flag conventions."""
+
+    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    def test_appends_to_special_use_sent_with_seen_flag(self, mock_cls):
+        mock_client = MagicMock()
+        mock_cls.return_value = mock_client
+        mock_client.list_folders.return_value = [
+            ((b"\\HasNoChildren",), b"/", "INBOX"),
+            ((b"\\Sent", b"\\HasNoChildren"), b"/", "[Gmail]/Sent Mail"),
+        ]
+
+        conn = ImapConnector("imap.gmail.com", 993, "u@gmail.com", "pw")
+        folder = conn.append_sent_copy(b"raw-bytes")
+
+        assert folder == "[Gmail]/Sent Mail"
+        args, kwargs = mock_client.append.call_args
+        assert args[0] == "[Gmail]/Sent Mail"
+        assert args[1] == b"raw-bytes"
+        flags = kwargs.get("flags", args[2] if len(args) > 2 else None)
+        assert flags is not None
+        assert b"\\Seen" in list(flags)
+        # A non-reply must NOT be marked answered.
+        assert b"\\Answered" not in list(flags)
+        mock_client.logout.assert_called_once()
+
+    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    def test_falls_back_to_conventional_icloud_sent_messages(self, mock_cls):
+        mock_client = MagicMock()
+        mock_cls.return_value = mock_client
+        # iCloud does not advertise \Sent SPECIAL-USE; it names the folder
+        # "Sent Messages".
+        mock_client.list_folders.return_value = [
+            ((b"\\HasNoChildren",), b"/", "INBOX"),
+            ((b"\\HasNoChildren",), b"/", "Sent Messages"),
+        ]
+
+        conn = ImapConnector("imap.mail.me.com", 993, "u@me.com", "pw")
+        folder = conn.append_sent_copy(b"raw-bytes")
+
+        assert folder == "Sent Messages"
+        assert mock_client.append.call_args[0][0] == "Sent Messages"
+
+    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    def test_conventional_fallback_handles_bytes_folder_names(self, mock_cls):
+        # Some servers return folder names as bytes rather than str; the
+        # convention scan must decode them before matching.
+        mock_client = MagicMock()
+        mock_cls.return_value = mock_client
+        mock_client.list_folders.return_value = [
+            ((b"\\HasNoChildren",), b"/", b"INBOX"),
+            ((b"\\HasNoChildren",), b"/", b"Sent Messages"),
+        ]
+
+        conn = ImapConnector("imap.mail.me.com", 993, "u@me.com", "pw")
+        folder = conn.append_sent_copy(b"raw-bytes")
+
+        assert folder == "Sent Messages"
+
+    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    def test_reply_copy_is_marked_answered(self, mock_cls):
+        mock_client = MagicMock()
+        mock_cls.return_value = mock_client
+        mock_client.list_folders.return_value = [
+            ((b"\\Sent",), b"/", "Sent"),
+        ]
+
+        conn = ImapConnector("imap.example.com", 993, "u@e.com", "pw")
+        conn.append_sent_copy(b"raw-bytes", answered=True)
+
+        _args, kwargs = mock_client.append.call_args
+        flags = list(kwargs["flags"])
+        assert b"\\Seen" in flags
+        assert b"\\Answered" in flags
+
+    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    def test_no_sent_folder_raises_not_found(self, mock_cls):
+        mock_client = MagicMock()
+        mock_cls.return_value = mock_client
+        # Neither SPECIAL-USE \Sent nor any conventional name present.
+        mock_client.list_folders.return_value = [
+            ((b"\\HasNoChildren",), b"/", "INBOX"),
+            ((b"\\HasNoChildren",), b"/", "Archive"),
+        ]
+
+        conn = ImapConnector("imap.example.com", 993, "u@e.com", "pw")
+        with pytest.raises(MailMessageNotFoundError):
+            conn.append_sent_copy(b"raw-bytes")
+        mock_client.append.assert_not_called()
+
+
 class TestEnvelopeVanishRobustness:
     """#314: a message can be expunged/moved between SEARCH and FETCH (a
     concurrent change), so the server's FETCH response omits ENVELOPE for

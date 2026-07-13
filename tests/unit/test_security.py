@@ -18,6 +18,7 @@ from apple_mail_fast_mcp.security import (
     detect_prompt_injection,
     operation_logger,
     rate_limiter,
+    send_recipients_test_violation,
     validate_bulk_operation,
     validate_send_operation,
 )
@@ -633,3 +634,36 @@ class TestInjectionScanEnabled:
     def test_other_values_keep_enabled(self, monkeypatch: Any) -> None:
         monkeypatch.setenv("APPLE_MAIL_MCP_DISABLE_INJECTION_SCAN", "0")
         assert _injection_scan_enabled() is True
+
+
+class TestTestModeRecipientViolation:
+    """#322/#175: transport-boundary reserved-domain guard for send paths
+    whose final recipient set is only known after in-connector derivation."""
+
+    def test_outside_test_mode_always_allowed(self, monkeypatch: Any) -> None:
+        monkeypatch.delenv("MAIL_TEST_MODE", raising=False)
+        assert send_recipients_test_violation(["real@person.com"]) is None
+
+    def test_reserved_recipients_allowed(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("MAIL_TEST_MODE", "true")
+        assert (
+            send_recipients_test_violation(
+                ["a@example.com", "b@example.net", "c@foo.test"]
+            )
+            is None
+        )
+
+    def test_real_recipient_blocked(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("MAIL_TEST_MODE", "true")
+        msg = send_recipients_test_violation(
+            ["ok@example.com", "leak@real-person.com"]
+        )
+        assert msg is not None
+        assert "leak@real-person.com" in msg
+        assert "ok@example.com" not in msg
+
+    def test_empty_recipients_blocked(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("MAIL_TEST_MODE", "true")
+        msg = send_recipients_test_violation([])
+        assert msg is not None
+        assert "explicit recipients" in msg

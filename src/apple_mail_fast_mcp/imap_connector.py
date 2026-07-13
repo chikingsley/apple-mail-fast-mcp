@@ -90,6 +90,7 @@ scan depth."""
 
 _FLAG_SEEN = b"\\Seen"
 _FLAG_FLAGGED = b"\\Flagged"
+_FLAG_ANSWERED = b"\\Answered"
 
 
 # ---------------------------------------------------------------------------
@@ -1347,6 +1348,19 @@ class ImapConnector:
         "INBOX.Drafts",
     )
 
+    # Conventional Sent folder names to fall back on when the server
+    # doesn't advertise \\Sent via SPECIAL-USE (RFC 6154). Issue #406.
+    # "Sent Messages" is iCloud's name; "[Gmail]/Sent Mail" is Gmail's
+    # (Gmail also advertises \\Sent, so the convention list is only a
+    # safety net there). Order is informative — first match wins per
+    # ``client.list_folders``.
+    _CONVENTIONAL_SENT_NAMES: tuple[str, ...] = (
+        "Sent",
+        "Sent Messages",
+        "[Gmail]/Sent Mail",
+        "INBOX.Sent",
+    )
+
     def append_draft(self, raw_message: bytes) -> str:
         """APPEND a pre-built RFC822 message to the account's Drafts
         folder with the ``\\Draft`` flag, and return the folder used.
@@ -1392,6 +1406,75 @@ class ImapConnector:
             else:
                 present.add(name)
         for candidate in self._CONVENTIONAL_DRAFTS_NAMES:
+            if candidate in present:
+                return candidate
+        return None
+
+    def append_sent_copy(
+        self, raw_message: bytes, *, answered: bool = False
+    ) -> str:
+        """APPEND a copy of an already-sent message to the Sent folder.
+
+        Restores the Sent-mailbox copy that the SMTP send path (#322)
+        dropped: Mail.app's AppleScript ``tell theMessage to send`` used to
+        save a copy into Sent as a side effect, but the direct ``smtplib``
+        submission bypasses that. This mirrors :meth:`append_draft` (#245)
+        — same IMAP-APPEND transport, targeting the Sent folder instead of
+        Drafts and flagging the copy as already-read (issue #406).
+
+        The copy is flagged ``\\Seen`` (outgoing mail is not "unread" to its
+        own sender) and, when ``answered`` is true, ``\\Answered`` — matching
+        the flag a normal reply carries in the Sent mailbox.
+
+        The Sent folder is resolved by the RFC 6154 ``\\Sent`` SPECIAL-USE
+        flag first (Gmail advertises it, so ``[Gmail]/Sent Mail`` is found
+        without hard-coding), then a conventional-name fallback that covers
+        iCloud's ``Sent Messages`` and other providers.
+
+        Args:
+            raw_message: The serialized RFC 822 message that was sent (from
+                ``build_draft_mime``; still carries any ``Bcc`` header, which
+                is intentional — the Sent copy records blind recipients, as
+                Mail.app's own Sent copy does).
+            answered: True when the sent message was itself a reply.
+
+        Returns:
+            The Sent folder name the copy was APPENDed to.
+
+        Raises:
+            MailMessageNotFoundError: No Sent folder discoverable via
+                SPECIAL-USE or conventional names. Callers treat this (like
+                any failure here) as best-effort — the message is already
+                delivered — and must not surface it as a send failure.
+            IMAPClientError: Protocol-level APPEND failure.
+        """
+        flags: list[bytes] = [_FLAG_SEEN]
+        if answered:
+            flags.append(_FLAG_ANSWERED)
+        with self._session() as client:
+            folder = self._find_sent_folder(
+                client
+            ) or self._find_sent_by_convention(client)
+            if folder is None:
+                raise MailMessageNotFoundError(
+                    f"No Sent folder found on {self._host} "
+                    f"(no \\Sent SPECIAL-USE flag and none of "
+                    f"{list(self._CONVENTIONAL_SENT_NAMES)} present)."
+                )
+            client.append(folder, raw_message, flags=flags)
+            return folder
+
+    def _find_sent_by_convention(self, client: IMAPClient) -> str | None:
+        """Fall back to conventional Sent names for servers that don't
+        advertise SPECIAL-USE ``\\Sent`` (e.g. iCloud's ``Sent Messages``).
+        First match wins in :attr:`_CONVENTIONAL_SENT_NAMES` order (#406)."""
+        present: set[str] = set()
+        for _flags, _delim, name in client.list_folders():
+            if isinstance(name, (bytes, bytearray)):
+                present.add(name.decode("utf-8", errors="replace"))
+            else:
+                present.add(name)
+        for candidate in self._CONVENTIONAL_SENT_NAMES:
             if candidate in present:
                 return candidate
         return None
@@ -1603,7 +1686,9 @@ class ImapConnector:
         """Return the Sent folder name via the ``\\Sent`` SPECIAL-USE flag,
         or None if not found. Used by Tier 1.5 (#125) as the second
         anchor-lookup target after INBOX — covers the common case of a
-        thread anchored at a sent message."""
+        thread anchored at a sent message — and by :meth:`append_sent_copy`
+        (#406), which falls back to :meth:`_find_sent_by_convention` when
+        this returns None."""
         for flags, _delim, name in client.list_folders():
             if b"\\Sent" in flags:
                 if isinstance(name, (bytes, bytearray)):

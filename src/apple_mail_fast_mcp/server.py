@@ -30,6 +30,7 @@ from .exceptions import (
     MailMailboxNotFoundError,
     MailMessageNotFoundError,
     MailRuleNotFoundError,
+    MailSafetyError,
     MailTemplateError,
     MailTemplateInvalidFormatError,
     MailTemplateInvalidNameError,
@@ -2669,6 +2670,11 @@ def _draft_action_error(op: str, e: Exception) -> dict[str, Any] | None:
         return {"success": False, "error": str(e), "error_type": "message_not_found"}
     if isinstance(e, MailAccountNotFoundError):
         return {"success": False, "error": str(e), "error_type": "account_not_found"}
+    if isinstance(e, MailSafetyError):
+        # Test-mode reserved-domain violation raised by the clean SMTP send
+        # path's transport-boundary guard (#322/#175). Surface it as a
+        # safety violation rather than a generic "unknown" error.
+        return {"success": False, "error": str(e), "error_type": "safety_violation"}
     if isinstance(e, FileNotFoundError):
         return {"success": False, "error": str(e), "error_type": "file_not_found"}
     if isinstance(e, MailDraftError):
