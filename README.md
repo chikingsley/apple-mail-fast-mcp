@@ -1,8 +1,6 @@
 # Apple Mail MCP Server
 
-[![Tests](https://github.com/s-morgan-jeffries/apple-mail-fast-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/s-morgan-jeffries/apple-mail-fast-mcp/actions/workflows/test.yml)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://github.com/chikingsley/apple-mail-fast-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/chikingsley/apple-mail-fast-mcp/actions/workflows/test.yml) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 An MCP server that provides programmatic access to Apple Mail, enabling AI assistants like Claude to read, send, search, and manage emails on macOS.
 
@@ -33,27 +31,20 @@ Destructive operations (`delete_*`, `create_rule` with move/forward/delete actio
 
 ### Claude Desktop — install from file (`.mcpb`)
 
-The lowest-friction path for Claude Desktop: grab the `apple-mail-fast-mcp-<version>.mcpb`
-bundle from the [Releases](https://github.com/s-morgan-jeffries/apple-mail-fast-mcp/releases)
-page and open it (or drag it into **Settings → Extensions**). Claude Desktop manages Python
-and dependencies for you via `uv` — no manual venv, no config JSON to hand-edit. macOS only.
+The lowest-friction path for Claude Desktop: grab the `apple-mail-fast-mcp-<version>.mcpb` bundle from the [Releases](https://github.com/s-morgan-jeffries/apple-mail-fast-mcp/releases) page and open it (or drag it into **Settings → Extensions**). Claude Desktop manages Python and dependencies for you via `uv` — no manual venv, no config JSON to hand-edit. macOS only.
 
-To build the bundle yourself: `./scripts/build-mcpb.sh` → `dist/apple-mail-fast-mcp-<version>.mcpb`
-(requires Node for the `mcpb` packer).
+To build the bundle yourself: `./scripts/build-mcpb.sh` → `dist/apple-mail-fast-mcp-<version>.mcpb` (requires Node for the `mcpb` packer).
 
 ### Claude Code — install as a plugin
 
 One command in Claude Code, no config JSON:
 
-```
+```text
 /plugin marketplace add s-morgan-jeffries/apple-mail-fast-mcp
 /plugin install apple-mail-fast@apple-mail-fast-mcp
 ```
 
-Claude Code launches the server via `uv run` from the plugin directory (resolves dependencies
-from the bundled `pyproject.toml`/`uv.lock` — no PyPI needed), so you only need `uv` installed.
-macOS only. See [`docs/reference/TOOLS.md`](docs/reference/TOOLS.md) for IMAP setup and the
-read/write split.
+Claude Code launches the server via `uv run` from the plugin directory (resolves dependencies from the bundled `pyproject.toml`/`uv.lock` — no PyPI needed), so you only need `uv` installed. macOS only. See [`docs/reference/TOOLS.md`](docs/reference/TOOLS.md) for IMAP setup and the read/write split.
 
 ### pip / uvx (any MCP client)
 
@@ -82,10 +73,13 @@ cd apple-mail-fast-mcp
 uv sync --dev
 ```
 
+### Private service over Tailscale
+
+To share one Mac's Mail.app with MCP clients on every device in your tailnet, run the Streamable HTTP transport on loopback and publish it through Tailscale Serve. The repository includes a locked `uv` LaunchAgent installer and the complete setup in [Private remote service on macOS](docs/guides/REMOTE_SERVICE.md).
+
 ## Configuration
 
-> Skip this section if you installed the `.mcpb` bundle — it wires up Claude Desktop for you.
-> The manual config below is for source installs.
+> Skip this section if you installed the `.mcpb` bundle — it wires up Claude Desktop for you. The manual config below is for source installs.
 
 Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`). `uv sync` installs a console script at `.venv/bin/apple-mail-fast-mcp`; point Claude Desktop at its **absolute path** — it's the most reliable form under Claude Desktop's restricted spawn environment (no reliance on `uv` being on `PATH`):
 
@@ -123,8 +117,7 @@ The `--read-only` server exposes only the 9 read tools, so Claude Desktop's per-
 
 ## Permissions
 
-On first run, macOS will prompt for Automation access. Grant permission in:
-**System Settings > Privacy & Security > Automation > Terminal (or your IDE)**
+On first run, macOS will prompt for Automation access. Grant permission in: **System Settings > Privacy & Security > Automation > Terminal (or your IDE)**
 
 ## Optional: faster search via IMAP
 
@@ -156,18 +149,18 @@ To remove the entry later: `apple-mail-fast-mcp setup-imap --account iCloud --un
 
 Some contexts have no usable Keychain: `uvx` runs (ephemeral binary paths break the Keychain ACL, causing re-prompts or failures), Docker / CI (no Keychain at all), and background services (the ACL prompt blocks forever with no UI attached). For those, you can supply the IMAP password via an environment variable instead:
 
-```
+```text
 APPLE_MAIL_MCP_IMAP_PASSWORD_<SUFFIX>
 ```
 
 `<SUFFIX>` is the Mail.app account name **uppercased**, with each run of non-alphanumeric characters collapsed to a single underscore and leading/trailing underscores trimmed:
 
-| Account name | Environment variable |
-|---|---|
-| `iCloud` | `APPLE_MAIL_MCP_IMAP_PASSWORD_ICLOUD` |
-| `Gmail` | `APPLE_MAIL_MCP_IMAP_PASSWORD_GMAIL` |
-| `Yahoo!` | `APPLE_MAIL_MCP_IMAP_PASSWORD_YAHOO` |
-| `My Gmail` | `APPLE_MAIL_MCP_IMAP_PASSWORD_MY_GMAIL` |
+| Account name | Environment variable                    |
+| ------------ | --------------------------------------- |
+| `iCloud`     | `APPLE_MAIL_MCP_IMAP_PASSWORD_ICLOUD`   |
+| `Gmail`      | `APPLE_MAIL_MCP_IMAP_PASSWORD_GMAIL`    |
+| `Yahoo!`     | `APPLE_MAIL_MCP_IMAP_PASSWORD_YAHOO`    |
+| `My Gmail`   | `APPLE_MAIL_MCP_IMAP_PASSWORD_MY_GMAIL` |
 
 When set to a non-empty value, the env var is used **in preference to** any Keychain entry for that account (it's checked first, with no `security` shell-out). An empty or whitespace-only value is ignored and the Keychain path is used. The lookup composes with the name↔UUID fallback, so an env var keyed on the account name is still found when a caller passes the account's UUID.
 
@@ -176,10 +169,12 @@ When set to a non-empty value, the env var is used **in preference to** any Keyc
 > Caveat: the name→suffix mapping isn't reversible — `Yahoo!` and `Yahoo` both map to `YAHOO`, and an account name with no ASCII letters/digits has no env-var form (use the Keychain for those).
 
 **Verifying the setup.** The `setup-imap` command does this for you. If you want to spot-check post-hoc:
+
 ```bash
 uv run python -c "from apple_mail_fast_mcp.mail_connector import AppleMailConnector; \
     print(AppleMailConnector().search_messages(account='<ACCOUNT_NAME>', limit=1))"
 ```
+
 If IMAP is working, the call returns in ~1 second. If it logs a WARNING about falling back (visible with `--log-level=DEBUG`), check that the account name matches Mail.app's account name exactly and that the email in your Keychain entry matches what `email addresses of account` returns.
 
 **Known provider quirks.**
@@ -218,19 +213,14 @@ make test-integration  # Integration tests (requires Mail.app)
 
 ## Architecture
 
-```
+```text
 server.py (FastMCP tools — thin orchestration, validation, elicitation gates)
   -> mail_connector.py (dispatch + domain logic)
      -> AppleScript path:  subprocess.run(["osascript", ...]) -> Apple Mail.app   (universal baseline)
      -> IMAP fast path:    imap_connector.py -> the account's IMAP server          (when hinted + Keychain creds)
 ```
 
-**Dispatch model.** AppleScript is the always-available baseline. When a read/mutation call supplies
-an `account` (and, where relevant, `mailbox`) hint **and** the account has Keychain IMAP credentials,
-the connector takes a server-side IMAP fast path; on any IMAP failure it falls back to AppleScript, so
-you never lose functionality — you only gain speed. See
-[docs/reference/ARCHITECTURE.md](docs/reference/ARCHITECTURE.md) for the full dispatch model, the
-dual-emit message-ID scheme, the drafts lifecycle, and the IMAP thread tiers.
+**Dispatch model.** AppleScript is the always-available baseline. When a read/mutation call supplies an `account` (and, where relevant, `mailbox`) hint **and** the account has Keychain IMAP credentials, the connector takes a server-side IMAP fast path; on any IMAP failure it falls back to AppleScript, so you never lose functionality — you only gain speed. See [docs/reference/ARCHITECTURE.md](docs/reference/ARCHITECTURE.md) for the full dispatch model, the dual-emit message-ID scheme, the drafts lifecycle, and the IMAP thread tiers.
 
 - **server.py** — MCP tool registration, input validation, confirmation (elicitation) gates, response formatting
 - **mail_connector.py** — AppleScript generation/execution + IMAP-fast-path dispatch
@@ -248,6 +238,7 @@ dual-emit message-ID scheme, the drafts lifecycle, and the IMAP thread tiers.
 - `save_attachments` is byte-capped (per-attachment + aggregate) against disk-fill DoS
 
 Docs:
+
 - [SECURITY.md](SECURITY.md) — vulnerability-reporting policy
 - [docs/SECURITY.md](docs/SECURITY.md) — user-facing security posture & privacy
 - [docs/guides/THREAT_MODEL.md](docs/guides/THREAT_MODEL.md) — STRIDE trust-boundary analysis

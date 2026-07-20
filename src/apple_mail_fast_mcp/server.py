@@ -3505,6 +3505,34 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "still gating writes per call. See docs/reference/TOOLS.md."
         ),
     )
+    parser.add_argument(
+        "--transport",
+        choices=("stdio", "http"),
+        default="stdio",
+        help=(
+            "MCP transport. Defaults to stdio for local clients. Use http "
+            "for a shared Streamable HTTP service."
+        ),
+    )
+    parser.add_argument(
+        "--listen-host",
+        default="127.0.0.1",
+        help=(
+            "HTTP bind address (default: 127.0.0.1). Keep this on loopback "
+            "when exposing the service through a local reverse proxy."
+        ),
+    )
+    parser.add_argument(
+        "--listen-port",
+        type=_port_arg,
+        default=8000,
+        help="HTTP bind port (default: 8000).",
+    )
+    parser.add_argument(
+        "--http-path",
+        default="/mcp",
+        help="Streamable HTTP endpoint path (default: /mcp).",
+    )
     sub = parser.add_subparsers(dest="command")
 
     setup_imap = sub.add_parser(
@@ -3584,8 +3612,22 @@ def main(argv: list[str] | None = None) -> int:
             "Read-only mode: 14 mutating tools skipped (--read-only). "
             "Only the 9 read tools are registered."
         )
-    logger.info("Starting Apple Mail MCP server")
-    mcp.run()
+    if args.transport == "http":
+        logger.info(
+            "Starting Apple Mail MCP server at http://%s:%d%s",
+            args.listen_host,
+            args.listen_port,
+            args.http_path,
+        )
+        mcp.run(
+            transport="http",
+            host=args.listen_host,
+            port=args.listen_port,
+            path=args.http_path,
+        )
+    else:
+        logger.info("Starting Apple Mail MCP server over stdio")
+        mcp.run()
     return 0
 
 

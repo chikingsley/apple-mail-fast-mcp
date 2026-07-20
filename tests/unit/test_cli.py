@@ -521,6 +521,65 @@ class TestServerMainDispatch:
         assert rc == 0
         assert run_calls == [True]
 
+    def test_http_transport_forwards_network_options(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apple_mail_fast_mcp import server as server_mod
+
+        run_calls: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            server_mod.mcp,
+            "run",
+            lambda **kwargs: run_calls.append(kwargs),
+        )
+
+        rc = server_mod.main(
+            [
+                "--transport",
+                "http",
+                "--listen-host",
+                "127.0.0.1",
+                "--listen-port",
+                "8765",
+                "--http-path",
+                "/mcp",
+            ]
+        )
+
+        assert rc == 0
+        assert run_calls == [
+            {
+                "host": "127.0.0.1",
+                "path": "/mcp",
+                "port": 8765,
+                "transport": "http",
+            }
+        ]
+
+    def test_http_transport_defaults_to_loopback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apple_mail_fast_mcp import server as server_mod
+
+        run_calls: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            server_mod.mcp,
+            "run",
+            lambda **kwargs: run_calls.append(kwargs),
+        )
+
+        rc = server_mod.main(["--transport", "http"])
+
+        assert rc == 0
+        assert run_calls == [
+            {
+                "host": "127.0.0.1",
+                "path": "/mcp",
+                "port": 8000,
+                "transport": "http",
+            }
+        ]
+
     def test_setup_imap_subcommand_does_not_start_server(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1005,6 +1064,14 @@ class TestSetupImapArgParsing:
         with pytest.raises(SystemExit):
             _build_arg_parser().parse_args(
                 ["setup-imap", "--account", "X", "--port", "0"]
+            )
+
+    def test_parser_rejects_out_of_range_listen_port(self) -> None:
+        from apple_mail_fast_mcp.server import _build_arg_parser
+
+        with pytest.raises(SystemExit):
+            _build_arg_parser().parse_args(
+                ["--transport", "http", "--listen-port", "0"]
             )
 
     def test_main_forwards_host_and_port(

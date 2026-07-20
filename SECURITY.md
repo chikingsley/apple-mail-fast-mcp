@@ -3,13 +3,13 @@
 ## Supported Versions
 
 | Version | Supported |
-|---------|-----------|
-| 0.3.x   | Yes       |
-| < 0.3   | No        |
+| ------- | --------- |
+| 0.10.x  | Yes       |
+| < 0.10  | No        |
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability, please report it via [GitHub private security advisory](https://github.com/s-morgan-jeffries/apple-mail-fast-mcp/security/advisories/new).
+If you discover a security vulnerability, please report it via [GitHub private security advisory](https://github.com/chikingsley/apple-mail-fast-mcp/security/advisories/new).
 
 **Do not open a public issue for security vulnerabilities.**
 

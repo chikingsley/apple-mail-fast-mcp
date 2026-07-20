@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>studio.peacockery.apple-mail-mcp</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>uv</string>
+    <string>run</string>
+    <string>--locked</string>
+    <string>apple-mail-fast-mcp</string>
+    <string>--transport</string>
+    <string>http</string>
+    <string>--listen-host</string>
+    <string>127.0.0.1</string>
+    <string>--listen-port</string>
+    <string>8765</string>
+    <string>--http-path</string>
+    <string>/mcp</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/Shared/apple-mail-fast-mcp</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>APPLE_MAIL_MCP_IMAP_POOL</key>
+    <string>1</string>
+    <key>FASTMCP_MASK_ERROR_DETAILS</key>
+    <string>true</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>/tmp/apple-mail-fast-mcp.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/apple-mail-fast-mcp.err.log</string>
+</dict>
+</plist>

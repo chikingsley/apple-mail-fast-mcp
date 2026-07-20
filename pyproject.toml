@@ -8,13 +8,16 @@ version = "0.10.2"
 description = "MCP server for Apple Mail integration"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
-    {name = "Morgan", email = "morgan@example.com"}
+    {name = "Morgan Jeffries"},
+]
+maintainers = [
+    {name = "Peacockery Studio"},
 ]
 keywords = ["mcp", "apple-mail", "email", "automation"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
@@ -61,9 +64,9 @@ dev = [
 apple-mail-fast-mcp = "apple_mail_fast_mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/s-morgan-jeffries/apple-mail-fast-mcp"
-Repository = "https://github.com/s-morgan-jeffries/apple-mail-fast-mcp"
-Issues = "https://github.com/s-morgan-jeffries/apple-mail-fast-mcp/issues"
+Homepage = "https://github.com/chikingsley/apple-mail-fast-mcp"
+Repository = "https://github.com/chikingsley/apple-mail-fast-mcp"
+Issues = "https://github.com/chikingsley/apple-mail-fast-mcp/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/apple_mail_fast_mcp"]
