@@ -34,7 +34,17 @@ install -m 600 "${SOURCE_PLIST}" "${TARGET_PLIST}"
 plutil -lint "${TARGET_PLIST}"
 
 launchctl bootout "${GUI_DOMAIN}/${LABEL}" 2>/dev/null || true
-launchctl bootstrap "${GUI_DOMAIN}" "${TARGET_PLIST}"
+for attempt in 1 2 3; do
+  if launchctl bootstrap "${GUI_DOMAIN}" "${TARGET_PLIST}"; then
+    break
+  fi
+  if [[ "${attempt}" -eq 3 ]]; then
+    echo "Could not bootstrap ${LABEL} after ${attempt} attempts." >&2
+    exit 1
+  fi
+  echo "launchd is still releasing ${LABEL}; retrying in one second." >&2
+  sleep 1
+done
 launchctl kickstart -k "${GUI_DOMAIN}/${LABEL}"
 launchctl print "${GUI_DOMAIN}/${LABEL}"
 
