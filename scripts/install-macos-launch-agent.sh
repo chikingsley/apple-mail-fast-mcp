@@ -22,7 +22,7 @@ install -d -m 700 "${HOME}/Library/LaunchAgents" "${LOG_DIR}"
 
 (
   cd "${PROJECT_DIR}"
-  uv sync --locked
+  uv sync --locked --no-dev
 )
 
 install -m 600 "${SOURCE_PLIST}" "${TARGET_PLIST}"

@@ -10,7 +10,7 @@ From the repository checkout on the Mac:
 ./scripts/install-macos-launch-agent.sh
 ```
 
-The installer performs a locked `uv` sync and loads `studio.peacockery.apple-mail-mcp` as a per-user LaunchAgent. It enables the IMAP connection pool, masks internal FastMCP errors, and writes logs to `~/Library/Logs/apple-mail-fast-mcp/`.
+The installer performs a locked, runtime-only `uv` sync and loads `studio.peacockery.apple-mail-mcp` as a per-user LaunchAgent. It enables the IMAP connection pool, masks internal FastMCP errors, disables startup update checks, and writes logs to `~/Library/Logs/apple-mail-fast-mcp/`.
 
 The process listens at `http://127.0.0.1:8765/mcp`. Keeping the bind address on loopback prevents LAN or public access.
 

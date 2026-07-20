@@ -10,6 +10,7 @@
     <string>uv</string>
     <string>run</string>
     <string>--locked</string>
+    <string>--no-dev</string>
     <string>apple-mail-fast-mcp</string>
     <string>--transport</string>
     <string>http</string>
@@ -28,6 +29,10 @@
     <string>1</string>
     <key>FASTMCP_MASK_ERROR_DETAILS</key>
     <string>true</string>
+    <key>FASTMCP_SHOW_SERVER_BANNER</key>
+    <string>false</string>
+    <key>FASTMCP_CHECK_FOR_UPDATES</key>
+    <string>off</string>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
