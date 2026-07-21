@@ -12,8 +12,10 @@ from apple_mail_fast_mcp.exceptions import (
 from apple_mail_fast_mcp.keychain import (
     _LEGACY_SERVICE_NAME_PREFIX,
     IMAP_PASSWORD_ENV_PREFIX,
+    IMAP_PASSWORD_FILE_ENV_PREFIX,
     SERVICE_NAME_PREFIX,
     _env_var_name,
+    _file_env_var_name,
     delete_imap_password,
     get_imap_password,
     set_imap_password,
@@ -357,6 +359,72 @@ class TestEnvVarName:
         # No ASCII alphanumerics -> no usable env var name; caller skips
         # the env path and uses Keychain.
         assert _env_var_name(account) is None
+
+
+class TestPasswordFileEnvVarName:
+    def test_prefix_and_normalization(self):
+        assert IMAP_PASSWORD_FILE_ENV_PREFIX == (
+            "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_"
+        )
+        assert _file_env_var_name("Peacockery") == (
+            "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_PEACOCKERY"
+        )
+
+    def test_empty_suffix_returns_none(self):
+        assert _file_env_var_name("日本語") is None
+
+
+class TestPasswordFileFallback:
+    @patch("apple_mail_fast_mcp.keychain.subprocess.run")
+    def test_password_file_returns_value_without_shellout(
+        self, mock_run, monkeypatch, tmp_path
+    ):
+        password_file = tmp_path / "imap-password"
+        password_file.write_text("file password\n", encoding="utf-8")
+        password_file.chmod(0o600)
+        monkeypatch.setenv(
+            "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_PEACOCKERY",
+            str(password_file),
+        )
+        assert get_imap_password("Peacockery", "simon@example.com") == (
+            "file password"
+        )
+        mock_run.assert_not_called()
+
+    @patch("apple_mail_fast_mcp.keychain.subprocess.run")
+    def test_password_file_takes_precedence_over_direct_env(
+        self, mock_run, monkeypatch, tmp_path
+    ):
+        password_file = tmp_path / "imap-password"
+        password_file.write_text("from-file", encoding="utf-8")
+        password_file.chmod(0o600)
+        monkeypatch.setenv(
+            "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_PEACOCKERY",
+            str(password_file),
+        )
+        monkeypatch.setenv(
+            "APPLE_MAIL_MCP_IMAP_PASSWORD_PEACOCKERY",
+            "from-env",
+        )
+        assert get_imap_password("Peacockery", "simon@example.com") == (
+            "from-file"
+        )
+        mock_run.assert_not_called()
+
+    @patch("apple_mail_fast_mcp.keychain.subprocess.run")
+    def test_unsafe_configured_file_fails_closed(
+        self, mock_run, monkeypatch, tmp_path
+    ):
+        password_file = tmp_path / "imap-password"
+        password_file.write_text("secret", encoding="utf-8")
+        password_file.chmod(0o644)
+        monkeypatch.setenv(
+            "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_PEACOCKERY",
+            str(password_file),
+        )
+        with pytest.raises(MailKeychainError, match="0400 or 0600"):
+            get_imap_password("Peacockery", "simon@example.com")
+        mock_run.assert_not_called()
 
 
 class TestEnvVarFallback:

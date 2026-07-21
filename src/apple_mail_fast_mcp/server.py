@@ -4,13 +4,16 @@ FastMCP server for Apple Mail integration.
 
 import argparse
 import atexit
+import hmac
 import logging
+import os
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, MutableMapping
 from pathlib import Path
 from typing import Annotated, Any, TypeVar, cast
 
+import uvicorn
 from fastmcp import Context, FastMCP
 from fastmcp.server.elicitation import AcceptedElicitation
 from pydantic import BeforeValidator
@@ -41,6 +44,7 @@ from .exceptions import (
 )
 from .imap_connector import ImapConnectionPool
 from .mail_connector import AppleMailConnector
+from .secret_file import SecretFileError, read_secret_file
 from .security import (
     _injection_scan_enabled,
     check_rate_limit,
@@ -99,6 +103,11 @@ AnyDict = Annotated[dict[str, Any], BeforeValidator(coerce_json_dict)]
 
 
 F = TypeVar("F", bound=Callable[..., Any])
+Scope = MutableMapping[str, Any]
+Message = MutableMapping[str, Any]
+Receive = Callable[[], Awaitable[Message]]
+Send = Callable[[Message], Awaitable[None]]
+ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 
 
 def _tool(
@@ -3487,6 +3496,74 @@ def _port_arg(value: str) -> int:
     return port
 
 
+class HTTPGuard:
+    """Require bearer authentication and reject browser-originated requests."""
+
+    def __init__(self, app: ASGIApp, token: str) -> None:
+        self.app = app
+        self.expected_authorization = f"Bearer {token}".encode()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        if b"origin" in headers:
+            await self._reject(send, 403, b"Origin requests are not allowed")
+            return
+        supplied = headers.get(b"authorization", b"")
+        if not hmac.compare_digest(supplied, self.expected_authorization):
+            await self._reject(
+                send,
+                401,
+                b"Unauthorized",
+                headers=[(b"www-authenticate", b"Bearer")],
+            )
+            return
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _reject(
+        send: Send,
+        status: int,
+        body: bytes,
+        *,
+        headers: list[tuple[bytes, bytes]] | None = None,
+    ) -> None:
+        response_headers = [(b"content-type", b"text/plain; charset=utf-8")]
+        response_headers.extend(headers or [])
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": response_headers,
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
+def _load_http_bearer_token(
+    *, token_file: str | None, token_env: str
+) -> str:
+    """Load and validate the required Streamable HTTP bearer token."""
+    if token_file:
+        try:
+            token = read_secret_file(token_file, label="HTTP bearer token")
+        except SecretFileError as exc:
+            raise RuntimeError(str(exc)) from exc
+    else:
+        token = os.environ.get(token_env, "").strip()
+        if not token:
+            raise RuntimeError(
+                "HTTP transport requires --bearer-token-file or a non-empty "
+                f"{token_env}"
+            )
+    if len(token) < 32:
+        raise RuntimeError("HTTP bearer token must contain at least 32 characters")
+    return token
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="apple-mail-fast-mcp",
@@ -3532,6 +3609,22 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--http-path",
         default="/mcp",
         help="Streamable HTTP endpoint path (default: /mcp).",
+    )
+    parser.add_argument(
+        "--bearer-token-file",
+        default=None,
+        help=(
+            "Owner-only file containing the required HTTP bearer token. "
+            "The file must have mode 0400 or 0600."
+        ),
+    )
+    parser.add_argument(
+        "--bearer-token-env",
+        default="APPLE_MAIL_MCP_BEARER_TOKEN",
+        help=(
+            "Environment-variable fallback for the required HTTP bearer "
+            "token (default: APPLE_MAIL_MCP_BEARER_TOKEN)."
+        ),
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -3613,17 +3706,22 @@ def main(argv: list[str] | None = None) -> int:
             "Only the 9 read tools are registered."
         )
     if args.transport == "http":
+        token = _load_http_bearer_token(
+            token_file=args.bearer_token_file,
+            token_env=args.bearer_token_env,
+        )
         logger.info(
             "Starting Apple Mail MCP server at http://%s:%d%s",
             args.listen_host,
             args.listen_port,
             args.http_path,
         )
-        mcp.run(
-            transport="http",
+        app = HTTPGuard(mcp.http_app(path=args.http_path), token)
+        uvicorn.run(
+            app,
             host=args.listen_host,
             port=args.listen_port,
-            path=args.http_path,
+            log_level="info",
         )
     else:
         logger.info("Starting Apple Mail MCP server over stdio")

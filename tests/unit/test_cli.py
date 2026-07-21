@@ -526,11 +526,19 @@ class TestServerMainDispatch:
     ) -> None:
         from apple_mail_fast_mcp import server as server_mod
 
+        http_app_calls: list[dict[str, Any]] = []
         run_calls: list[dict[str, Any]] = []
+        downstream = MagicMock()
+        monkeypatch.setenv("APPLE_MAIL_MCP_BEARER_TOKEN", "t" * 32)
         monkeypatch.setattr(
             server_mod.mcp,
+            "http_app",
+            lambda **kwargs: http_app_calls.append(kwargs) or downstream,
+        )
+        monkeypatch.setattr(
+            server_mod.uvicorn,
             "run",
-            lambda **kwargs: run_calls.append(kwargs),
+            lambda app, **kwargs: run_calls.append({"app": app, **kwargs}),
         )
 
         rc = server_mod.main(
@@ -547,37 +555,42 @@ class TestServerMainDispatch:
         )
 
         assert rc == 0
-        assert run_calls == [
-            {
-                "host": "127.0.0.1",
-                "path": "/mcp",
-                "port": 8765,
-                "transport": "http",
-            }
-        ]
+        assert http_app_calls == [{"path": "/mcp"}]
+        assert len(run_calls) == 1
+        assert isinstance(run_calls[0]["app"], server_mod.HTTPGuard)
+        assert run_calls[0]["app"].app is downstream
+        assert run_calls[0] | {"app": None} == {
+            "app": None,
+            "host": "127.0.0.1",
+            "port": 8765,
+            "log_level": "info",
+        }
 
     def test_http_transport_defaults_to_loopback(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from apple_mail_fast_mcp import server as server_mod
 
+        http_app_calls: list[dict[str, Any]] = []
         run_calls: list[dict[str, Any]] = []
+        monkeypatch.setenv("APPLE_MAIL_MCP_BEARER_TOKEN", "t" * 32)
         monkeypatch.setattr(
             server_mod.mcp,
+            "http_app",
+            lambda **kwargs: http_app_calls.append(kwargs) or MagicMock(),
+        )
+        monkeypatch.setattr(
+            server_mod.uvicorn,
             "run",
-            lambda **kwargs: run_calls.append(kwargs),
+            lambda app, **kwargs: run_calls.append(kwargs),
         )
 
         rc = server_mod.main(["--transport", "http"])
 
         assert rc == 0
+        assert http_app_calls == [{"path": "/mcp"}]
         assert run_calls == [
-            {
-                "host": "127.0.0.1",
-                "path": "/mcp",
-                "port": 8000,
-                "transport": "http",
-            }
+            {"host": "127.0.0.1", "port": 8000, "log_level": "info"}
         ]
 
     def test_setup_imap_subcommand_does_not_start_server(

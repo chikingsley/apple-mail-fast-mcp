@@ -33,6 +33,7 @@ from apple_mail_fast_mcp.exceptions import (
     MailKeychainEntryNotFoundError,
     MailKeychainError,
 )
+from apple_mail_fast_mcp.secret_file import SecretFileError, read_secret_file
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ _LEGACY_SERVICE_NAME_PREFIX = "apple-mail-mcp.imap."
 # uppercased with runs of non-[A-Z0-9] collapsed to a single underscore and
 # leading/trailing underscores trimmed (e.g. "My Gmail" -> "MY_GMAIL").
 IMAP_PASSWORD_ENV_PREFIX = "APPLE_MAIL_MCP_IMAP_PASSWORD_"
+IMAP_PASSWORD_FILE_ENV_PREFIX = "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_"
 
 _ENV_SUFFIX_SEP_RE = re.compile(r"[^A-Z0-9]+")
 
@@ -55,19 +57,33 @@ _EXIT_INTERACTION_NOT_ALLOWED = 128
 _ACCESS_DENIED_MARKERS = ("-25308", "-128", "not allowed", "user canceled")
 
 
+def _env_suffix(mail_app_account: str) -> str | None:
+    """Normalize a Mail.app account name for credential environment vars."""
+    suffix = _ENV_SUFFIX_SEP_RE.sub("_", mail_app_account.upper()).strip("_")
+    return suffix or None
+
+
 def _env_var_name(mail_app_account: str) -> str | None:
     """Return the env-var name an account's IMAP password may be read from,
     or ``None`` when the account name has no ASCII alphanumerics to build a
-    usable suffix from (e.g. an all-non-ASCII name — use Keychain instead).
+    usable suffix from (e.g. an all-non-ASCII name — use a file or Keychain).
 
     The mapping is not injective: ``"Yahoo!"`` and ``"Yahoo"`` both yield
     ``YAHOO``. This is documented; distinct accounts that collide must use
     Keychain. (#248)
     """
-    suffix = _ENV_SUFFIX_SEP_RE.sub("_", mail_app_account.upper()).strip("_")
+    suffix = _env_suffix(mail_app_account)
     if not suffix:
         return None
     return IMAP_PASSWORD_ENV_PREFIX + suffix
+
+
+def _file_env_var_name(mail_app_account: str) -> str | None:
+    """Return the env-var name for an account's IMAP password file."""
+    suffix = _env_suffix(mail_app_account)
+    if not suffix:
+        return None
+    return IMAP_PASSWORD_FILE_ENV_PREFIX + suffix
 
 
 def _run_security(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -170,12 +186,23 @@ def get_imap_password(mail_app_account: str, email: str) -> str:
         MailKeychainAccessDeniedError: ACL or user denial.
         MailKeychainError: Any other ``security(1)`` failure.
 
-    Env-var fallback (#248): for uvx / headless / CI contexts where the
-    Keychain isn't usable, an env var named per ``_env_var_name`` is checked
-    first; a present, non-empty value is returned without shelling out to
-    ``security``. This is less private than Keychain (env vars show up in
-    ``ps`` / ``launchctl env`` / crash dumps) — see the README.
+    Credential precedence is password file, direct environment variable, then
+    Keychain. A configured password file must be a regular, current-user-owned
+    file with mode 0400 or 0600. Unsafe or unreadable configured files fail
+    closed instead of silently falling through to a different credential.
     """
+    file_env_name = _file_env_var_name(mail_app_account)
+    if file_env_name:
+        file_path = os.environ.get(file_env_name)
+        if file_path and file_path.strip():
+            try:
+                return read_secret_file(
+                    file_path.strip(),
+                    label=f"IMAP password for account {mail_app_account!r}",
+                )
+            except SecretFileError as exc:
+                raise MailKeychainError(str(exc)) from exc
+
     env_name = _env_var_name(mail_app_account)
     if env_name:
         env_pw = os.environ.get(env_name)

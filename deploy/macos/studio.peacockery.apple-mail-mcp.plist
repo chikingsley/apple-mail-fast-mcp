@@ -20,6 +20,8 @@
     <string>8765</string>
     <string>--http-path</string>
     <string>/mcp</string>
+    <string>--bearer-token-file</string>
+    <string>__APPLE_MAIL_MCP_BEARER_TOKEN_FILE__</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/Shared/apple-mail-fast-mcp</string>
@@ -27,6 +29,8 @@
   <dict>
     <key>APPLE_MAIL_MCP_IMAP_POOL</key>
     <string>1</string>
+    <key>APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_PEACOCKERY</key>
+    <string>__APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_PEACOCKERY__</string>
     <key>FASTMCP_MASK_ERROR_DETAILS</key>
     <string>true</string>
     <key>FASTMCP_SHOW_SERVER_BANNER</key>

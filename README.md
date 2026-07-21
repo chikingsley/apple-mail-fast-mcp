@@ -123,7 +123,7 @@ On first run, macOS will prompt for Automation access. Grant permission in: **Sy
 
 `search_messages` works out of the box via AppleScript. For large mailboxes (thousands of messages), AppleScript's `whose` clause can take 1–5 seconds per query. If you want faster server-side search, you can enable IMAP delegation per account by adding a Keychain entry.
 
-**How it works.** If credentials exist for an account, the server uses IMAP (fast, server-side SEARCH). Otherwise — or on any IMAP failure (offline, wrong password, timeout) — it silently falls back to AppleScript. You never lose functionality; you only gain speed when IMAP is configured and reachable. The normal opt-in is a Keychain entry (below); an environment-variable fallback ([further down](#environment-variable-fallback-uvx--headless--ci)) covers contexts where the Keychain isn't usable.
+**How it works.** If credentials exist for an account, the server uses IMAP (fast, server-side SEARCH). Otherwise — or on any IMAP failure (offline, wrong password, timeout) — it silently falls back to AppleScript. You never lose functionality; you only gain speed when IMAP is configured and reachable. Credential lookup checks an owner-only password file first, then the direct environment variable, then Keychain.
 
 **One-time setup per account — the `setup-imap` subcommand walks you through it:**
 
@@ -145,7 +145,15 @@ If you see a one-time "security wants to use the 'login' keychain" prompt on the
 
 To remove the entry later: `apple-mail-fast-mcp setup-imap --account iCloud --uninstall`.
 
-### Environment-variable fallback (uvx / headless / CI)
+### Password-file and environment fallbacks
+
+Background services can keep the password in an owner-only file rather than Keychain or the process environment. Set this variable to an absolute path:
+
+```text
+APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_<SUFFIX>
+```
+
+The target must be a regular, non-symlink file owned by the current user with mode `0400` or `0600`. A configured missing or unsafe file fails closed. The file source takes precedence over the direct environment variable and Keychain.
 
 Some contexts have no usable Keychain: `uvx` runs (ephemeral binary paths break the Keychain ACL, causing re-prompts or failures), Docker / CI (no Keychain at all), and background services (the ACL prompt blocks forever with no UI attached). For those, you can supply the IMAP password via an environment variable instead:
 
@@ -162,9 +170,9 @@ APPLE_MAIL_MCP_IMAP_PASSWORD_<SUFFIX>
 | `Yahoo!`     | `APPLE_MAIL_MCP_IMAP_PASSWORD_YAHOO`    |
 | `My Gmail`   | `APPLE_MAIL_MCP_IMAP_PASSWORD_MY_GMAIL` |
 
-When set to a non-empty value, the env var is used **in preference to** any Keychain entry for that account (it's checked first, with no `security` shell-out). An empty or whitespace-only value is ignored and the Keychain path is used. The lookup composes with the name↔UUID fallback, so an env var keyed on the account name is still found when a caller passes the account's UUID.
+When set to a non-empty value and no password file is configured, the env var is used **in preference to** any Keychain entry for that account. An empty or whitespace-only value is ignored and the Keychain path is used. The lookup composes with the name↔UUID fallback, so a file or env var keyed on the account name is still found when a caller passes the account's UUID.
 
-> ⚠️ **Security tradeoff.** Environment variables are far less private than the Keychain — they're visible via `ps -E`, `launchctl getenv`, `/proc`-style introspection, and process crash dumps, and they're easy to leak into logs or shell history. **Use this only when the Keychain genuinely isn't an option** (uvx, Docker, CI, headless). For Claude Desktop and standard local installs, stick with `setup-imap` + Keychain.
+> ⚠️ **Security tradeoff.** Direct secret environment variables are far less private than a locked password file or Keychain: they can be visible through process introspection and crash dumps and are easy to leak into logs or shell history. Prefer the password-file form for persistent background services.
 >
 > Caveat: the name→suffix mapping isn't reversible — `Yahoo!` and `Yahoo` both map to `YAHOO`, and an account name with no ASCII letters/digits has no env-var form (use the Keychain for those).
 
