@@ -17,7 +17,9 @@ Funnel must remain disabled.
 ## Requirements
 
 - macOS with Apple Mail configured
+- Xcode or Xcode Command Line Tools with the Swift compiler
 - Python 3.14 managed by `uv`
+- Administrator access for the one-time local certificate trust
 - Tailscale on devices that use the remote MCP service
 - An IMAP password file or Keychain entry for fast server-side search
 
@@ -26,16 +28,10 @@ Funnel must remain disabled.
 Clone the repository on the Mac and run:
 
 ```bash
-uv sync --locked
 ./scripts/install-macos-launch-agent.sh
 ```
 
-The installer builds the native helper, signs it, validates secret-file permissions, installs both per-user LaunchAgents, and restarts the service. On first install, request Mail Automation from the helper and click **Allow**:
-
-```bash
-"$HOME/Applications/Apple Mail MCP Helper.app/Contents/MacOS/AppleMailMCPHelper" \
-  --request-mail-automation
-```
+The installer creates or reuses a machine-local code-signing identity, performs a locked `uv` sync, builds and signs the native helper, validates secret-file permissions, installs both per-user LaunchAgents, restarts the service, and verifies Mail Automation. On first install, macOS asks for administrator authorization to trust the local signing certificate and asks whether the helper may control Mail. Approve both prompts once; later rebuilds retain the same signed identity.
 
 The current Peacockery deployment reads its IMAP password from `~/.config/apple-mail-fast-mcp/imap-password-peacockery` and its HTTP token from `~/.config/apple-mail-fast-mcp/http-bearer-token`. Both files must be owned by the current user and use mode `0400` or `0600`.
 

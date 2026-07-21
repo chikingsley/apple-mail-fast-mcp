@@ -15,9 +15,11 @@ readonly TARGET_PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 readonly CONFIG_DIR="${HOME}/.config/apple-mail-fast-mcp"
 readonly SOCKET_PATH="${CONFIG_DIR}/applescript-helper.sock"
 readonly LOG_DIR="${HOME}/Library/Logs/apple-mail-fast-mcp"
-readonly SIGNING_IDENTITY="${APPLE_MAIL_MCP_CODESIGN_IDENTITY:--}"
+readonly LOCAL_SIGNING_IDENTITY="Apple Mail MCP Local Signing"
 readonly BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/apple-mail-mcp-helper.XXXXXX")"
 readonly GUI_DOMAIN="gui/$(id -u)"
+
+SIGNING_IDENTITY="${APPLE_MAIL_MCP_CODESIGN_IDENTITY:-}"
 
 cleanup() {
   rm -rf -- "${BUILD_DIR}"
@@ -32,7 +34,18 @@ fi
 command -v codesign >/dev/null
 command -v install >/dev/null
 command -v plutil >/dev/null
+command -v security >/dev/null
 command -v xcrun >/dev/null
+
+if [[ -z "${SIGNING_IDENTITY}" ]]; then
+  if security find-identity -v -p codesigning 2>/dev/null \
+    | grep -Fq "\"${LOCAL_SIGNING_IDENTITY}\""; then
+    SIGNING_IDENTITY="${LOCAL_SIGNING_IDENTITY}"
+  else
+    SIGNING_IDENTITY="-"
+  fi
+fi
+readonly SIGNING_IDENTITY
 
 xcrun swiftc \
   -parse-as-library \

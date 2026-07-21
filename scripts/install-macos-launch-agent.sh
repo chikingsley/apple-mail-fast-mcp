@@ -24,6 +24,10 @@ command -v uv >/dev/null
 command -v launchctl >/dev/null
 command -v openssl >/dev/null
 
+if [[ -z "${APPLE_MAIL_MCP_CODESIGN_IDENTITY:-}" ]]; then
+  "${SCRIPT_DIR}/create-macos-signing-identity.sh"
+fi
+
 install -d -m 700 \
   "${HOME}/Library/LaunchAgents" \
   "${LOG_DIR}" \
@@ -120,3 +124,13 @@ if [[ -e "${PEACOCKERY_IMAP_PASSWORD_FILE}" ]]; then
 else
   echo "Peacockery IMAP password file not present; AppleScript fallback remains enabled."
 fi
+
+MAIL_ACCOUNT_COUNT="$(
+  "${APPLESCRIPT_HELPER_APP}/Contents/MacOS/AppleMailMCPHelper" \
+    --request-mail-automation
+)"
+if [[ ! "${MAIL_ACCOUNT_COUNT}" =~ ^[0-9]+$ ]]; then
+  echo "Mail Automation check returned an invalid account count." >&2
+  exit 1
+fi
+echo "Mail Automation verified: ${MAIL_ACCOUNT_COUNT} accounts visible."

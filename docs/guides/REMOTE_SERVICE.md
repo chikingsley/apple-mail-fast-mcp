@@ -10,24 +10,30 @@ From the repository checkout on the Mac:
 ./scripts/install-macos-launch-agent.sh
 ```
 
-The installer builds and signs `~/Applications/Apple Mail MCP Helper.app`, loads the helper and MCP server as separate per-user LaunchAgents, and performs a locked, runtime-only `uv` sync. The MCP service enables the IMAP connection pool, masks internal FastMCP errors, disables startup update checks, and writes logs to `~/Library/Logs/apple-mail-fast-mcp/`.
+The installer creates or reuses a machine-local code-signing identity, builds and signs `~/Applications/Apple Mail MCP Helper.app`, loads the helper and MCP server as separate per-user LaunchAgents, performs a locked, runtime-only `uv` sync, and verifies Mail Automation. The MCP service enables the IMAP connection pool, masks internal FastMCP errors, disables startup update checks, and writes logs to `~/Library/Logs/apple-mail-fast-mcp/`.
 
 The helper is a small resident native app with no TCP or HTTP listener. It creates `~/.config/apple-mail-fast-mcp/applescript-helper.sock` as an owner-only `0600` Unix socket and rejects clients from another user ID. The Python service sends its internally generated AppleScript through that local socket, and the helper executes it through `NSAppleScript`. Because launchd owns the helper process directly, macOS Automation attributes Mail access to the app instead of `uv` or an ephemeral Python executable.
 
 ## Grant Mail Automation once
 
-After the first install, trigger the macOS consent dialog from the signed helper:
+The installer triggers the macOS consent dialog from the signed helper. Click **Allow**. If access was previously denied, enable **Apple Mail MCP Helper > Mail** under **System Settings > Privacy & Security > Automation**, then verify it directly:
 
 ```bash
 "$HOME/Applications/Apple Mail MCP Helper.app/Contents/MacOS/AppleMailMCPHelper" \
   --request-mail-automation
 ```
 
-The command asks the resident helper for Mail's account count, which triggers the real Automation permission rather than an unrestricted metadata query such as Mail's version. Click **Allow**. If access was previously denied, enable **Apple Mail MCP Helper > Mail** under **System Settings > Privacy & Security > Automation** and run the command again. The `uv > Mail` toggle is not used by this service.
+The command asks the resident helper for Mail's account count, which exercises the real Automation permission rather than an unrestricted metadata query such as Mail's version. The `uv > Mail` toggle is not used by this service.
 
-The default signature is ad hoc because it requires no certificate or Keychain setup. Reinstalling unchanged helper source on the same Swift toolchain preserves its code identity; changing the helper binary changes that identity and can require granting Automation again.
+The installer automatically creates or reuses a valid ten-year local identity named `Apple Mail MCP Local Signing`. macOS requests one administrator authorization when the certificate is first trusted. Later rebuilds retain the same designated requirement and do not require another Automation grant.
 
-For a stable identity across helper rebuilds, install a code-signing certificate and set its exact identity name before running the installer:
+To create or repair the identity without reinstalling the service, run:
+
+```bash
+./scripts/create-macos-signing-identity.sh
+```
+
+To use an Apple-issued identity instead, set its exact name before running the installer:
 
 ```bash
 export APPLE_MAIL_MCP_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)"
@@ -40,7 +46,9 @@ The practical certificate choices are:
 - Apple Development: Apple-issued and appropriate for development on registered machines.
 - Developer ID Application: Apple-issued for software distributed outside the Mac App Store and the correct choice if the helper will later be notarized or installed elsewhere.
 
-Every certificate-backed option stores the certificate and its private key in Keychain; the environment variable supplies only the identity name. If Keychain is completely off-limits, ad hoc signing is the remaining built-in option. Switching from the current ad hoc identity to a certificate-backed identity can require one new Automation grant, after which rebuilds signed by that identity should retain the same designated requirement.
+Every certificate-backed option stores the certificate and its private key in Keychain; the environment variable supplies only the identity name. Switching from an ad-hoc identity to a certificate-backed identity can require one new Automation grant, after which rebuilds signed by that identity retain the same designated requirement.
+
+To skip local identity creation and force an ad-hoc signature, run `APPLE_MAIL_MCP_CODESIGN_IDENTITY=- ./scripts/install-macos-launch-agent.sh`.
 
 On first install it generates a 256-bit bearer token at `~/.config/apple-mail-fast-mcp/http-bearer-token`. The file is never printed and must remain owned by the current user with mode `0600` (read-only mode `0400` is also accepted). Later installs reuse the same token.
 
@@ -116,4 +124,4 @@ tail -n 100 ~/Library/Logs/apple-mail-fast-mcp/service.err.log
 tail -n 100 ~/Library/Logs/apple-mail-fast-mcp/helper.err.log
 ```
 
-After updating the checkout, rerun `./scripts/install-macos-launch-agent.sh`. The installer rebuilds the native helper, performs a locked sync, and restarts only this LaunchAgent. If the helper source changed and the install uses the default ad hoc signature, grant Mail Automation again.
+After updating the checkout, rerun `./scripts/install-macos-launch-agent.sh`. The installer rebuilds the native helper, performs a locked sync, and restarts only this LaunchAgent. If the helper source changed and the install uses an ad-hoc signature, grant Mail Automation again.
