@@ -4,6 +4,7 @@ import contextlib
 import smtplib
 import socket
 import struct
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -38,32 +39,35 @@ class TestAppleMailConnector:
     def test_run_applescript_uses_resident_native_helper(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
     ) -> None:
         """Regression: AppleScript requests use the configured resident helper."""
-        socket_path = tmp_path / "helper.sock"
-        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        listener.bind(str(socket_path))
-        listener.listen(1)
-        received: list[str] = []
+        # Darwin limits AF_UNIX paths to 103 bytes. GitHub's macOS runner uses
+        # a much longer pytest temp root, so bind under the short /tmp alias.
+        with tempfile.TemporaryDirectory(prefix="amfmcp-", dir="/tmp") as temp_dir:
+            socket_path = Path(temp_dir) / "helper.sock"
+            received: list[str] = []
 
-        def serve_once() -> None:
-            with listener, listener.accept()[0] as connection:
-                request_size = struct.unpack("!I", connection.recv(4))[0]
-                received.append(connection.recv(request_size).decode("utf-8"))
-                payload = b"result"
-                connection.sendall(struct.pack("!BI", 0, len(payload)) + payload)
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                listener.bind(str(socket_path))
+                listener.listen(1)
 
-        server = threading.Thread(target=serve_once)
-        server.start()
-        monkeypatch.setenv("APPLE_MAIL_MCP_APPLESCRIPT_SOCKET", str(socket_path))
+                def serve_once() -> None:
+                    with listener.accept()[0] as connection:
+                        request_size = struct.unpack("!I", connection.recv(4))[0]
+                        received.append(connection.recv(request_size).decode("utf-8"))
+                        payload = b"result"
+                        connection.sendall(struct.pack("!BI", 0, len(payload)) + payload)
 
-        connector = AppleMailConnector(timeout=30)
+                server = threading.Thread(target=serve_once)
+                server.start()
+                monkeypatch.setenv("APPLE_MAIL_MCP_APPLESCRIPT_SOCKET", str(socket_path))
 
-        assert connector._run_applescript("test script") == "result"
-        server.join(timeout=5)
-        assert not server.is_alive()
-        assert received == ["test script"]
+                connector = AppleMailConnector(timeout=30)
+
+                assert connector._run_applescript("test script") == "result"
+                server.join(timeout=5)
+                assert not server.is_alive()
+                assert received == ["test script"]
 
     def test_configured_native_helper_socket_fails_closed(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
