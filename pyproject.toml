@@ -1,140 +1,104 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [project]
 name = "apple-mail-fast-mcp"
 version = "0.10.2"
-description = "MCP server for Apple Mail integration"
+description = "Private MCP access to Apple Mail"
 readme = "README.md"
-requires-python = ">=3.10"
-license = "MIT"
-authors = [
-    {name = "Morgan Jeffries"},
-]
-maintainers = [
-    {name = "Peacockery Studio"},
-]
-keywords = ["mcp", "apple-mail", "email", "automation"]
-classifiers = [
-    "Development Status :: 5 - Production/Stable",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: MacOS",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-]
-
+requires-python = ">=3.14"
 dependencies = [
     "fastmcp>=3.3.1",
     "imapclient>=3.1.0",
     "uvicorn>=0.51.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=9.0.3",
-    "pytest-asyncio>=1.4.0",
-    "pytest-cov>=7.1.0",
-    "hypothesis>=6.100.0",
-    "radon>=6.0.1",
-    "pip-audit>=2.7.0",
-    "ruff>=0.15.15",
-    "mypy>=1.20.2",
-]
-research = [
-    "imapclient>=3.1.0",
-]
-
-[dependency-groups]
-dev = [
-    "pytest>=9.0.3",
-    "pytest-asyncio>=1.4.0",
-    "pytest-cov>=7.1.0",
-    "hypothesis>=6.100.0",
-    "radon>=6.0.1",
-    "pip-audit>=2.7.0",
-    "ruff>=0.15.15",
-    "mypy>=1.20.2",
-]
-
 [project.scripts]
 apple-mail-fast-mcp = "apple_mail_fast_mcp.server:main"
 
-[project.urls]
-Homepage = "https://github.com/chikingsley/apple-mail-fast-mcp"
-Repository = "https://github.com/chikingsley/apple-mail-fast-mcp"
-Issues = "https://github.com/chikingsley/apple-mail-fast-mcp/issues"
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12"]
+build-backend = "uv_build"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/apple_mail_fast_mcp"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
-addopts = "-v --tb=short --strict-markers"
-markers = [
-    "asyncio: mark test as an async test",
-    "integration: mark test as integration test (requires --run-integration)",
-    "e2e: mark test as end-to-end test (full MCP stack)",
-    "benchmark: mark test as performance benchmark",
-    "slow: mark test as slow-running",
-    "real_account_fallback: opt out of the conftest stub of _alternative_account_identifier (for tests that exercise the real name<->UUID Keychain fallback)",
-    "allow_real_io: opt out of the conftest guard that blocks real network/DNS in unit tests (#408)",
+[dependency-groups]
+dev = [
+    "hypothesis>=6.100.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.20",
+    "ty>=0.0.55",
+    "vulture>=2.16",
 ]
-
-[tool.coverage.run]
-source = ["apple_mail_fast_mcp"]
-
-[tool.coverage.report]
-fail_under = 90
-show_missing = true
-exclude_lines = [
-    "if __name__ == .__main__.:",
-]
-
-[tool.black]
-line-length = 100
-target-version = ["py310", "py311", "py312", "py313"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
 
 [tool.ruff.lint]
-select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "B",   # flake8-bugbear
-    "C4",  # flake8-comprehensions
-    "UP",  # pyupgrade
-]
+preview = true
+select = ["ALL"]
 ignore = [
-    "E501",  # line too long (handled by ruff format)
+    "CPY", # This private project does not impose per-file copyright headers.
+    # Ruff documents these as incompatible with its formatter.
+    "W191", "E111", "E114", "E117", "D203", "D206", "D213", "D300",
+    "Q000", "Q001", "Q002", "Q003", "Q004", "COM812", "COM819", "ISC002",
+    # Existing narrative docstrings are useful without NumPy-style boilerplate.
+    "D", "DOC",
+    # Apple events, MCP payloads, and email parsers have genuinely dynamic boundaries.
+    "ANN401",
+    # Public MCP signatures and connector methods are compatibility surfaces.
+    "A002", "ARG002", "FBT001", "FBT002", "PLR0904", "PLR0911", "PLR0912",
+    "PLR0913", "PLR0914", "PLR0917", "PLR2004", "PLR6301", "C901",
+    # Fallback orchestration intentionally catches, logs, and translates failures.
+    "BLE001", "TRY003", "TRY300", "TRY301", "TRY400", "TRY401", "PLW0717",
+    "EM101", "EM102",
+    # CLI output is the interface, and typographic punctuation is intentional prose.
+    "T201", "RUF001", "RUF002", "RUF003",
+    # AppleScript source is embedded as Python strings and cannot be formatter-wrapped.
+    "E501",
+    # Explicit branches are clearer than nested conditional expressions here.
+    "SIM108",
+    # These names describe provider URLs and environment keys, not embedded secrets.
+    "S105", "S106",
+    # ``today`` intentionally follows the Mac's local calendar date.
+    "DTZ011",
 ]
 
-[tool.mypy]
-python_version = "3.10"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-strict_equality = true
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
 
-[[tool.mypy.overrides]]
-module = ["imapclient", "imapclient.*"]
-ignore_missing_imports = true
+[tool.ruff.lint.per-file-ignores]
+"scripts/check_*.py" = ["INP001"]
+"src/apple_mail_fast_mcp/cli.py" = ["SLF001"]
+"src/apple_mail_fast_mcp/keychain.py" = ["S404", "S603"]
+"src/apple_mail_fast_mcp/mail_connector.py" = ["S404", "S603"]
+"src/apple_mail_fast_mcp/security.py" = ["S404", "S603"]
+"tests/**/*.py" = [
+    "ANN", "ARG", "DTZ", "PLC0415", "PLC1901", "PLC2701", "PLR", "PT", "S",
+    "SLF001", "TC",
+]
+
+[tool.ty.src]
+include = ["src", "tests"]
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.rules]
+all = "error"
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.pytest.ini_options]
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+filterwarnings = ["error"]
+markers = [
+    "live: test real Apple Mail, IMAP, SMTP, or MCP behavior",
+    "live_send: send a real message when explicitly enabled",
+    "regression: pin a documented bug or issue",
+    "allow_real_io: permit deliberate socket access in a regression",
+    "real_account_fallback: exercise the real account name and UUID fallback",
+]
+testpaths = ["tests/regressions"]

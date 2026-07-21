@@ -11,6 +11,8 @@ readonly LOG_DIR="${HOME}/Library/Logs/apple-mail-fast-mcp"
 readonly CONFIG_DIR="${HOME}/.config/apple-mail-fast-mcp"
 readonly BEARER_TOKEN_FILE="${CONFIG_DIR}/http-bearer-token"
 readonly PEACOCKERY_IMAP_PASSWORD_FILE="${CONFIG_DIR}/imap-password-peacockery"
+readonly APPLESCRIPT_HELPER_APP="${HOME}/Applications/Apple Mail MCP Helper.app"
+readonly APPLESCRIPT_HELPER_SOCKET="${CONFIG_DIR}/applescript-helper.sock"
 readonly GUI_DOMAIN="gui/$(id -u)"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -59,6 +61,12 @@ if [[ ! -e "${BEARER_TOKEN_FILE}" ]]; then
 fi
 validate_secret_file "${BEARER_TOKEN_FILE}" "HTTP bearer token"
 
+"${SCRIPT_DIR}/install-macos-helper.sh"
+if [[ ! -S "${APPLESCRIPT_HELPER_SOCKET}" || -L "${APPLESCRIPT_HELPER_SOCKET}" ]]; then
+  echo "AppleScript helper socket is unavailable: ${APPLESCRIPT_HELPER_SOCKET}" >&2
+  exit 1
+fi
+
 (
   cd "${PROJECT_DIR}"
   uv sync --locked --no-dev
@@ -72,6 +80,9 @@ install -m 600 "${SOURCE_PLIST}" "${TARGET_PLIST}"
   "Set :StandardErrorPath ${LOG_DIR}/service.err.log" "${TARGET_PLIST}"
 /usr/libexec/PlistBuddy -c \
   "Set :ProgramArguments:15 ${BEARER_TOKEN_FILE}" "${TARGET_PLIST}"
+/usr/libexec/PlistBuddy -c \
+  "Set :EnvironmentVariables:APPLE_MAIL_MCP_APPLESCRIPT_SOCKET ${APPLESCRIPT_HELPER_SOCKET}" \
+  "${TARGET_PLIST}"
 if [[ -e "${PEACOCKERY_IMAP_PASSWORD_FILE}" ]]; then
   validate_secret_file \
     "${PEACOCKERY_IMAP_PASSWORD_FILE}" \
@@ -102,6 +113,7 @@ launchctl kickstart -k "${GUI_DOMAIN}/${LABEL}"
 launchctl print "${GUI_DOMAIN}/${LABEL}"
 
 echo "Apple Mail MCP is listening on http://127.0.0.1:8765/mcp"
+echo "AppleScript helper: ${APPLESCRIPT_HELPER_APP}"
 echo "Bearer token file: ${BEARER_TOKEN_FILE}"
 if [[ -e "${PEACOCKERY_IMAP_PASSWORD_FILE}" ]]; then
   echo "Peacockery IMAP password file enabled."

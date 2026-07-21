@@ -7,10 +7,11 @@ invocation (no subcommand) starts the MCP server — that path lives in
 
 from __future__ import annotations
 
+import contextlib
 import getpass
 import sys
 import webbrowser
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from imapclient.exceptions import IMAPClientError, LoginError
 
@@ -35,6 +36,9 @@ from .keychain import (
 from .mail_connector import AppleMailConnector
 from .utils import is_apple_hosted_address, is_icloud_imap_host
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 _MAX_PASSWORD_ATTEMPTS = 3
 
 
@@ -47,25 +51,18 @@ def _print_available_accounts(accounts: list[dict[str, object]]) -> None:
         print(f"  - {name}", file=sys.stderr)
 
 
-def _account_exists(
-    accounts: list[dict[str, object]], requested_name: str
-) -> bool:
+def _account_exists(accounts: list[dict[str, object]], requested_name: str) -> bool:
     return any(acc.get("name") == requested_name for acc in accounts)
 
 
-def _maybe_print_icloud_login_hint(
-    cli_email: str | None, host: str, email: str
-) -> None:
+def _maybe_print_icloud_login_hint(cli_email: str | None, host: str, email: str) -> None:
     """On an iCloud login failure, if no `--email` was given and the login
     we tried isn't an Apple-hosted address, this is the classic #341 shape
     (third-party Apple ID, no @icloud.com alias in Mail.app). Point the user
     at the override path. No-op otherwise (incl. legitimate #201 custom-domain
-    accounts, whose login succeeds and never reaches here)."""
-    if (
-        not cli_email
-        and is_icloud_imap_host(host)
-        and not is_apple_hosted_address(email)
-    ):
+    accounts, whose login succeeds and never reaches here).
+    """
+    if not cli_email and is_icloud_imap_host(host) and not is_apple_hosted_address(email):
         print(
             "  Hint: this looks like an iCloud account whose Apple ID is "
             "a third-party email. Re-run with `--email <your "
@@ -81,7 +78,8 @@ def _offer_app_password_page(
     input_fn: Callable[[str], str],
 ) -> None:
     """Print scoped-credential guidance for the detected provider and, when it
-    has an app-password page, offer to open it in the browser. (#384)"""
+    has an app-password page, offer to open it in the browser. (#384)
+    """
     print(
         "\nThis uses a scoped app-specific password — limited to this one "
         "account and revocable anytime (unlike granting full disk access)."
@@ -95,12 +93,12 @@ def _offer_app_password_page(
     print(f"\nApp-password page: {url}")
     try:
         answer = input_fn("Open this page in your browser now? [Y/n] ")
-    except (EOFError, OSError):
+    except EOFError, OSError:
         answer = "n"  # non-interactive (no stdin) — don't try to open
-    if answer.strip().lower() in ("", "y", "yes"):
+    if answer.strip().lower() in {"", "y", "yes"}:
         try:
             open_url_fn(url)
-        except Exception:  # noqa: BLE001 — a browser hiccup must not abort setup
+        except Exception:
             print(f"  (couldn't open a browser — visit {url} manually)")
 
 
@@ -114,11 +112,10 @@ def _rollback(
 ) -> None:
     """Undo a just-written Keychain entry (+ any --email login override and
     --host/--port server override) so a rejected password never leaves a
-    broken item that get_imap_password would happily return."""
-    try:
+    broken item that get_imap_password would happily return.
+    """
+    with contextlib.suppress(MailKeychainError):
         delete_imap_password(account_name, email)
-    except MailKeychainError:
-        pass
     if cli_email:
         delete_login_override(account_name)
     if cli_host or cli_port:
@@ -146,7 +143,7 @@ def _prompt_write_verify(
         last = attempt == _MAX_PASSWORD_ATTEMPTS
         try:
             password = getpass_fn("Enter app-specific password: ")
-        except (EOFError, KeyboardInterrupt):
+        except EOFError, KeyboardInterrupt:
             print("\nCancelled.", file=sys.stderr)
             return 1
         if not password:
@@ -160,9 +157,7 @@ def _prompt_write_verify(
         except MailKeychainError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
-        print(
-            f"Stored in Keychain as 'apple-mail-fast-mcp.imap.{account_name}'."
-        )
+        print(f"Stored in Keychain as 'apple-mail-fast-mcp.imap.{account_name}'.")
         # Persist an explicit --email as a login override so runtime resolution
         # uses the same login we verify here — otherwise runtime re-derives it
         # from Mail.app and ignores --email (#341).
@@ -181,13 +176,15 @@ def _prompt_write_verify(
             imap.search_messages(mailbox="INBOX", limit=1)
         except LoginError as exc:
             _rollback(
-                account_name, email, cli_email,
-                cli_host=cli_host, cli_port=cli_port,
+                account_name,
+                email,
+                cli_email,
+                cli_host=cli_host,
+                cli_port=cli_port,
             )
             if not last:
                 print(
-                    f"  Login rejected ({exc}) — the entry was removed; "
-                    "try again.",
+                    f"  Login rejected ({exc}) — the entry was removed; try again.",
                     file=sys.stderr,
                 )
                 continue
@@ -234,9 +231,7 @@ def run_setup_imap(
     cli_port: int | None = None,
     connector_factory: Callable[[], AppleMailConnector] | None = None,
     getpass_fn: Callable[[str], str] | None = None,
-    imap_factory: Callable[
-        [str, int, str, str], ImapConnector
-    ] | None = None,
+    imap_factory: Callable[[str, int, str, str], ImapConnector] | None = None,
     open_url_fn: Callable[[str], object] | None = None,
     input_fn: Callable[[str], str] | None = None,
 ) -> int:
@@ -250,8 +245,7 @@ def run_setup_imap(
 
     if not _account_exists(accounts, account_name):
         print(
-            f"ERROR: No Mail.app account named {account_name!r}. "
-            "Available accounts:",
+            f"ERROR: No Mail.app account named {account_name!r}. Available accounts:",
             file=sys.stderr,
         )
         _print_available_accounts(accounts)
@@ -289,8 +283,7 @@ def run_setup_imap(
             delete_imap_password(account_name, email)
         except MailKeychainEntryNotFoundError:
             print(
-                f"No Keychain entry to remove for {account_name!r} "
-                f"({email}).",
+                f"No Keychain entry to remove for {account_name!r} ({email}).",
                 file=sys.stderr,
             )
             return 1
@@ -331,4 +324,4 @@ def run_setup_imap(
     )
 
 
-__all__ = ["run_setup_imap", "get_imap_password"]
+__all__ = ["get_imap_password", "run_setup_imap"]

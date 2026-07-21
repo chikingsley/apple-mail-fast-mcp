@@ -16,7 +16,7 @@ import email
 import mimetypes
 import re
 from dataclasses import dataclass, field
-from email.message import EmailMessage, MIMEPart
+from email.message import EmailMessage, Message, MIMEPart
 from email.policy import default as _default_policy
 from email.utils import formataddr, formatdate, getaddresses, make_msgid, parseaddr
 from pathlib import Path
@@ -114,8 +114,8 @@ def build_draft_mime(
     # socket.getfqdn() — a reverse-DNS lookup that stalls ~5s per call in
     # environments without hostname/reverse-DNS (the #408 CI leak), and that
     # otherwise leaks the local machine's FQDN into outgoing Message-IDs.
-    _local, _at, _domain = parseaddr(sender)[1].rpartition("@")
-    message_id = make_msgid(domain=_domain if _at and _domain else "localhost")
+    _, separator, domain = parseaddr(sender)[1].rpartition("@")
+    message_id = make_msgid(domain=domain if separator and domain else "localhost")
     msg["Message-ID"] = message_id
     msg["From"] = _sanitize_header(sender)
     msg["To"] = ", ".join(_sanitize_header(a) for a in to)
@@ -133,13 +133,13 @@ def build_draft_mime(
         # multipart/alternative: text/plain first (fallback + reply quoting),
         # then text/html. Derive the plain part from the HTML when no
         # explicit plain body was supplied. (#251)
-        msg.set_content(body if body else _html_to_text(body_html))
+        msg.set_content(body or _html_to_text(body_html))
         msg.add_alternative(body_html, subtype="html")
     else:
         msg.set_content(body)
 
-    for path in attachments or []:
-        path = Path(path)
+    for attachment in attachments or []:
+        path = Path(attachment)
         ctype, _encoding = mimetypes.guess_type(path.name)
         maintype, _, subtype = (ctype or "application/octet-stream").partition("/")
         msg.add_attachment(
@@ -217,9 +217,7 @@ def derive_reply_recipients(
 
 def _quote_lines(text: str) -> str:
     """Prefix each line of ``text`` with ``> `` (email plain-text quoting)."""
-    return "\n".join(
-        (f"> {line}" if line else ">") for line in (text or "").splitlines()
-    )
+    return "\n".join((f"> {line}" if line else ">") for line in (text or "").splitlines())
 
 
 def build_reply_body(
@@ -233,11 +231,7 @@ def build_reply_body(
     line, then the original quoted with ``> ``.
     """
     attribution = f"On {original_date.strip()}, {original_from.strip()} wrote:"
-    return (
-        f"{new_body.rstrip()}\n\n"
-        f"{attribution}\n"
-        f"{_quote_lines(original_text)}\n"
-    )
+    return f"{new_body.rstrip()}\n\n{attribution}\n{_quote_lines(original_text)}\n"
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -299,18 +293,16 @@ def _attachment_payload_bytes(part: MIMEPart[Any, Any]) -> bytes:
         cte = (part.get("Content-Transfer-Encoding") or "").strip().lower()
         sub = part.get_payload()
         if (
-            cte in ("", "7bit", "8bit", "binary")
+            cte in {"", "7bit", "8bit", "binary"}
             and isinstance(sub, list)
             and sub
-            and hasattr(sub[0], "as_bytes")
+            and isinstance(sub[0], Message)
         ):
             return sub[0].as_bytes()
     return b""
 
 
-def _walk_attachment_parts(
-    part: MIMEPart[Any, Any], out: list[MIMEPart[Any, Any]]
-) -> None:
+def _walk_attachment_parts(part: MIMEPart[Any, Any], out: list[MIMEPart[Any, Any]]) -> None:
     """Collect attachment parts in MIME document order.
 
     Applies the same inclusion predicate as the IMAP BODYSTRUCTURE metadata

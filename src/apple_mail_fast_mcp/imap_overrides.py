@@ -31,30 +31,23 @@ def _overrides_path() -> Path:
     are honored (same convention as templates/drafts ``default_root``).
     """
     home_override = os.environ.get("APPLE_MAIL_MCP_HOME")
-    base = (
-        Path(home_override)
-        if home_override
-        else Path.home() / ".apple_mail_mcp"
-    )
+    base = Path(home_override) if home_override else Path.home() / ".apple_mail_mcp"
     return base / "imap_login_overrides.json"
 
 
 def _load() -> dict[str, str]:
     """Load the override map. A missing, unreadable, or corrupt file yields
-    an empty map — overrides must never raise into the IMAP resolve path."""
+    an empty map — overrides must never raise into the IMAP resolve path.
+    """
     path = _overrides_path()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return {}
     if not isinstance(data, dict):
         return {}
     # Keep only str->str entries; ignore anything malformed.
-    return {
-        str(k): str(v)
-        for k, v in data.items()
-        if isinstance(k, str) and isinstance(v, str)
-    }
+    return {str(k): str(v) for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
 
 
 def get_login_override(account: str) -> str | None:
@@ -70,7 +63,8 @@ def get_login_override(account: str) -> str | None:
 
 def set_login_override(account: str, email: str) -> None:
     """Persist ``account -> email`` (the IMAP LOGIN username). Creates the
-    home directory and file if needed; merges with any existing entries."""
+    home directory and file if needed; merges with any existing entries.
+    """
     overrides = _load()
     overrides[account] = email.strip()
     path = _overrides_path()
@@ -83,7 +77,8 @@ def set_login_override(account: str, email: str) -> None:
 
 def delete_login_override(account: str) -> None:
     """Remove ``account``'s override if present. No-op when absent or when
-    the file doesn't exist."""
+    the file doesn't exist.
+    """
     overrides = _load()
     if account not in overrides:
         return
@@ -118,37 +113,32 @@ def delete_login_override(account: str) -> None:
 def _server_overrides_path() -> Path:
     """Path to the server-override (host/port) file, honoring
     ``APPLE_MAIL_MCP_HOME`` (resolved at call time, same convention as
-    :func:`_overrides_path`)."""
+    :func:`_overrides_path`).
+    """
     home_override = os.environ.get("APPLE_MAIL_MCP_HOME")
-    base = (
-        Path(home_override)
-        if home_override
-        else Path.home() / ".apple_mail_mcp"
-    )
+    base = Path(home_override) if home_override else Path.home() / ".apple_mail_mcp"
     return base / "imap_server_overrides.json"
 
 
 def _load_server() -> dict[str, dict[str, Any]]:
     """Load the server-override map. A missing, unreadable, or corrupt file
     yields an empty map — overrides must never raise into the IMAP resolve
-    path. Keeps only ``str -> dict`` entries."""
+    path. Keeps only ``str -> dict`` entries.
+    """
     path = _server_overrides_path()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return {}
     if not isinstance(data, dict):
         return {}
-    return {
-        str(k): v
-        for k, v in data.items()
-        if isinstance(k, str) and isinstance(v, dict)
-    }
+    return {str(k): v for k, v in data.items() if isinstance(k, str) and isinstance(v, dict)}
 
 
 def get_host_override(account: str) -> str | None:
     """Return the persisted IMAP host override for ``account``, or ``None``.
-    Empty/whitespace-only values are treated as absent."""
+    Empty/whitespace-only values are treated as absent.
+    """
     host = _load_server().get(account, {}).get("host")
     if isinstance(host, str) and host.strip():
         return host.strip()
@@ -158,16 +148,15 @@ def get_host_override(account: str) -> str | None:
 def get_port_override(account: str) -> int | None:
     """Return the persisted IMAP port override for ``account``, or ``None``.
     Non-int / out-of-range values are treated as absent (``bool`` is a
-    subclass of ``int`` and is deliberately excluded)."""
+    subclass of ``int`` and is deliberately excluded).
+    """
     port = _load_server().get(account, {}).get("port")
     if isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535:
         return port
     return None
 
 
-def set_server_override(
-    account: str, *, host: str | None, port: int | None
-) -> None:
+def set_server_override(account: str, *, host: str | None, port: int | None) -> None:
     """Persist host and/or port overrides for ``account`` (#405).
 
     Only the provided fields are stored; passing both ``None`` is a no-op
@@ -193,7 +182,8 @@ def set_server_override(
 
 def delete_server_override(account: str) -> None:
     """Remove ``account``'s server override if present. No-op when absent or
-    when the file doesn't exist; drops the file when the last entry goes."""
+    when the file doesn't exist; drops the file when the last entry goes.
+    """
     overrides = _load_server()
     if account not in overrides:
         return

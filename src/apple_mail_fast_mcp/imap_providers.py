@@ -69,8 +69,10 @@ OUTLOOK = Provider(
     app_password_url="https://account.microsoft.com/security",
     steps=(
         "Advanced security options → App passwords → Create.",
-        "App passwords require two-step verification to be on, and are "
-        "unavailable on some managed/work accounts.",
+        (
+            "App passwords require two-step verification to be on, and are "
+            "unavailable on some managed/work accounts."
+        ),
     ),
 )
 
@@ -89,8 +91,10 @@ GENERIC = Provider(
     name="your email provider",
     app_password_url=None,
     steps=(
-        "In your provider's account security settings, look for "
-        "'app password' or 'app-specific password'.",
+        (
+            "In your provider's account security settings, look for "
+            "'app password' or 'app-specific password'."
+        ),
         "You'll usually need to enable two-factor auth first.",
         "Generate one scoped to Mail/IMAP and paste it below.",
     ),

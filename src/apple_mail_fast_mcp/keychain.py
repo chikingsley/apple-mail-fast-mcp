@@ -88,7 +88,8 @@ def _file_env_var_name(mail_app_account: str) -> str | None:
 
 def _run_security(args: list[str]) -> subprocess.CompletedProcess[str]:
     """Invoke ``security`` capturing output; map a missing binary to
-    ``MailKeychainError`` (the only failure not signalled via exit code)."""
+    ``MailKeychainError`` (the only failure not signalled via exit code).
+    """
     try:
         return subprocess.run(
             args,
@@ -108,18 +109,17 @@ def _raise_security_failure(
 ) -> NoReturn:
     """Map a non-zero ``security`` exit to the right exception. NotFound is
     handled by callers (it drives the legacy-prefix fallback); this raises
-    AccessDenied vs. a generic Keychain error for everything else."""
+    AccessDenied vs. a generic Keychain error for everything else.
+    """
     stderr = result.stderr or ""
     if result.returncode == _EXIT_INTERACTION_NOT_ALLOWED or any(
         marker in stderr for marker in _ACCESS_DENIED_MARKERS
     ):
         raise MailKeychainAccessDeniedError(
-            f"Keychain access denied for service={service!r}, account={email!r}: "
-            f"{stderr.strip()}"
+            f"Keychain access denied for service={service!r}, account={email!r}: {stderr.strip()}"
         )
     raise MailKeychainError(
-        f"security {action} failed (exit {result.returncode}): "
-        f"{stderr.strip()}"
+        f"security {action} failed (exit {result.returncode}): {stderr.strip()}"
     )
 
 
@@ -127,7 +127,8 @@ def _find_password(service: str, email: str) -> str:
     """Read one Keychain entry for an exact service name. Raises
     ``MailKeychainEntryNotFoundError`` on a miss (lets the caller fall back to
     the legacy prefix), or AccessDenied / generic errors via
-    ``_raise_security_failure``."""
+    ``_raise_security_failure``.
+    """
     result = _run_security(
         [
             "security",
@@ -151,7 +152,8 @@ def _find_password(service: str, email: str) -> str:
 def _delete_password(service: str, email: str) -> None:
     """Delete one Keychain entry for an exact service name. Raises
     ``MailKeychainEntryNotFoundError`` on a miss (lets the caller fall back to
-    the legacy prefix), or AccessDenied / generic errors."""
+    the legacy prefix), or AccessDenied / generic errors.
+    """
     result = _run_security(
         [
             "security",
@@ -223,14 +225,10 @@ def get_imap_password(mail_app_account: str, email: str) -> str:
     try:
         return _find_password(SERVICE_NAME_PREFIX + mail_app_account, email)
     except MailKeychainEntryNotFoundError:
-        return _find_password(
-            _LEGACY_SERVICE_NAME_PREFIX + mail_app_account, email
-        )
+        return _find_password(_LEGACY_SERVICE_NAME_PREFIX + mail_app_account, email)
 
 
-def set_imap_password(
-    mail_app_account: str, email: str, password: str
-) -> None:
+def set_imap_password(mail_app_account: str, email: str, password: str) -> None:
     """Write or update an IMAP app password to Keychain.
 
     Uses ``security add-generic-password ... -U`` so re-running with a

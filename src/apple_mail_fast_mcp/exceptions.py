@@ -6,26 +6,19 @@ Custom exceptions for Apple Mail MCP operations.
 class MailError(Exception):
     """Base exception for Mail operations."""
 
-    pass
-
 
 class MailAccountNotFoundError(MailError):
     """Account does not exist."""
-
-    pass
 
 
 class MailMailboxNotFoundError(MailError):
     """Mailbox does not exist."""
 
-    pass
-
 
 class MailMailboxNotEmptyError(MailError):
     """Mailbox cannot be deleted because it contains messages and the
-    caller did not opt in to cascade-delete via ``delete_messages=True``."""
-
-    pass
+    caller did not opt in to cascade-delete via ``delete_messages=True``.
+    """
 
 
 class MailUnsupportedGmailSystemLabelError(MailError):
@@ -38,31 +31,26 @@ class MailUnsupportedGmailSystemLabelError(MailError):
     2 of #164) will provide a proper alternative.
     """
 
-    pass
-
 
 class MailImapRequiredError(MailError):
     """The requested operation requires IMAP credentials and the user
     hasn't opted in (no Keychain entry, or entry is unreachable). Surfaces
     the gap so the caller can prompt the user to set up IMAP if they want
-    the operation."""
-
-    pass
+    the operation.
+    """
 
 
 class MailAttachmentIndexError(MailError):
     """The requested attachment index doesn't exist on the message
-    (out of range, or the message has no attachments). (#250)"""
-
-    pass
+    (out of range, or the message has no attachments). (#250)
+    """
 
 
 class MailAttachmentTooLargeError(MailError):
     """The attachment exceeds the inline-content size cap for
     ``get_attachment_content``; the caller should use ``save_attachments``
-    for large files. (#250)"""
-
-    pass
+    for large files. (#250)
+    """
 
 
 class MailImapMoveUnsupportedError(MailError):
@@ -70,9 +58,8 @@ class MailImapMoveUnsupportedError(MailError):
     (RFC 4315). No safe scoped move is possible; the orchestrator must
     fall back to AppleScript. A non-UIDPLUS unscoped EXPUNGE would
     remove every \\Deleted-flagged message in the mailbox, not just the
-    ones we just moved."""
-
-    pass
+    ones we just moved.
+    """
 
 
 class MailImapTrashNotFoundError(MailError):
@@ -80,45 +67,32 @@ class MailImapTrashNotFoundError(MailError):
     (RFC 6154) and no folder matching the conventional names (Trash,
     [Gmail]/Trash, Deleted Messages, Deleted Items) was found. Without
     a Trash folder we can't preserve the move-to-Trash semantic of
-    delete_messages — fall back to AppleScript."""
-
-    pass
+    delete_messages — fall back to AppleScript.
+    """
 
 
 class MailMessageNotFoundError(MailError):
     """Message does not exist."""
 
-    pass
-
 
 class MailAppleScriptError(MailError):
     """AppleScript execution failed."""
-
-    pass
 
 
 class MailPermissionError(MailError):
     """Permission denied for operation."""
 
-    pass
-
 
 class MailOperationCancelledError(MailError):
     """User cancelled the operation."""
-
-    pass
 
 
 class MailSafetyError(MailError):
     """Safety check failed in test mode (wrong account or non-reserved recipient)."""
 
-    pass
-
 
 class MailKeychainError(MailError):
     """Keychain operation failed."""
-
-    pass
 
 
 class MailKeychainEntryNotFoundError(MailKeychainError):
@@ -129,8 +103,6 @@ class MailKeychainEntryNotFoundError(MailKeychainError):
     a silent fall-back-to-AppleScript signal.
     """
 
-    pass
-
 
 class MailKeychainAccessDeniedError(MailKeychainError):
     """Keychain refused access (ACL denied or user denied prompt).
@@ -139,13 +111,9 @@ class MailKeychainAccessDeniedError(MailKeychainError):
     degradation invariants in imap-auth-options-decision.md.
     """
 
-    pass
-
 
 class MailRuleNotFoundError(MailError):
     """Rule index is out of range — no such rule exists in Mail.app."""
-
-    pass
 
 
 class MailUnsupportedRuleActionError(MailError):
@@ -156,28 +124,22 @@ class MailUnsupportedRuleActionError(MailError):
     refused.
     """
 
-    pass
-
 
 class MailDraftError(MailError):
     """Base class for draft-lifecycle errors."""
-
-    pass
 
 
 class MailDraftInvalidIdError(MailDraftError):
     """Draft id failed validation (path traversal, invalid chars, too long,
     or empty). Ids must match ^[A-Za-z0-9._@+=-]{1,255}$ — a Mail.app
-    numeric id or a bare RFC 5322 Message-ID, with no path separators."""
-
-    pass
+    numeric id or a bare RFC 5322 Message-ID, with no path separators.
+    """
 
 
 class MailDraftNotFoundError(MailDraftError):
     """No draft exists with the requested id (lookup across Drafts mailboxes
-    of every account returned nothing)."""
-
-    pass
+    of every account returned nothing).
+    """
 
 
 class MailDraftHtmlUnavailableError(MailDraftError):
@@ -186,40 +148,32 @@ class MailDraftHtmlUnavailableError(MailDraftError):
     or APPEND failed). HTML drafts are built as RFC822 multipart/alternative
     over IMAP — Mail.app's AppleScript ``content`` setter is plain-text only —
     so we fail loud rather than silently downgrade to a plain-text draft.
-    (#251)"""
-
-    pass
+    (#251)
+    """
 
 
 class MailTemplateError(MailError):
     """Base class for email-template errors."""
 
-    pass
-
 
 class MailTemplateNotFoundError(MailTemplateError):
     """No template exists with the requested name."""
 
-    pass
-
 
 class MailTemplateInvalidNameError(MailTemplateError):
     """Template name fails validation (path traversal, invalid chars,
-    too long, or empty). Names must match ^[a-zA-Z0-9_-]{1,64}$."""
-
-    pass
+    too long, or empty). Names must match ^[a-zA-Z0-9_-]{1,64}$.
+    """
 
 
 class MailTemplateInvalidFormatError(MailTemplateError):
     """A file in the templates directory could not be parsed as a
-    template (malformed header, unreadable, or empty body)."""
-
-    pass
+    template (malformed header, unreadable, or empty body).
+    """
 
 
 class MailTemplateMissingVariableError(MailTemplateError):
     """render_template encountered a {placeholder} with no matching
     auto-fill or user-supplied variable. The exception message names
-    the missing placeholder(s)."""
-
-    pass
+    the missing placeholder(s).
+    """

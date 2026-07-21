@@ -1,4 +1,4 @@
-name: Tests
+name: Checks
 
 on:
   workflow_dispatch: {}
@@ -7,53 +7,16 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  unit-tests:
+  check:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-
       - uses: astral-sh/setup-uv@v7
-
-      - run: uv python install 3.10
-
-      - run: uv sync --dev
-
-      - name: Lint
-        run: uv run ruff check src/ tests/
-
-      - name: Type check
-        run: uv run mypy src/
-
-      - name: Unit tests
-        run: uv run pytest tests/ -m "not integration and not e2e and not benchmark" -v --cov=apple_mail_fast_mcp --cov-report=term-missing --cov-fail-under=90
-        # The unit suite runs in seconds (~13s in CI incl. coverage). A tight
-        # cap is a backstop against a real-I/O leak that stalls in CI (#298,
-        # #408). The primary defense is now the autouse `_block_real_io` guard
-        # in tests/unit/conftest.py, which fails such leaks fast; this cap
-        # just bounds a pathological hang. Keep it tight.
-        timeout-minutes: 3
-
-      - name: Complexity check
-        run: ./scripts/check_complexity.sh
-
-      - name: Version sync check
-        run: ./scripts/check_version_sync.sh
-
-      - name: Client-server parity check
-        run: ./scripts/check_client_server_parity.sh
-
-      - name: Docs drift check
-        run: ./scripts/check_docs.sh
-
-  test-summary:
-    runs-on: ubuntu-latest
-    needs: [unit-tests]
-    if: always()
-    steps:
-      - name: Check test results
-        run: |
-          if [ "${{ needs.unit-tests.result }}" != "success" ]; then
-            echo "Unit tests failed"
-            exit 1
-          fi
+      - uses: extractions/setup-just@v4
+      - run: uv python install 3.14
+      - run: uv sync --locked
+      - run: just check

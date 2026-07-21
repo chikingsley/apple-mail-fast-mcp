@@ -1,261 +1,103 @@
-# Apple Mail MCP Server
+# Apple Mail MCP
 
-[![Tests](https://github.com/chikingsley/apple-mail-fast-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/chikingsley/apple-mail-fast-mcp/actions/workflows/test.yml) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+A private MCP service for reading, searching, drafting, sending, and managing email through Apple Mail on Hochi. The service is source-deployed with `uv`; it is not published to PyPI.
 
-An MCP server that provides programmatic access to Apple Mail, enabling AI assistants like Claude to read, send, search, and manage emails on macOS.
+## How it works
 
-> ⚠️ **Pre-1.0 — expect breaking changes.** The MCP tool surface (tool names, parameters, return shapes) is still evolving as the project matures. Pin to a specific version (for example, `apple-mail-fast-mcp==0.10.2`) and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+FastMCP exposes the mail tools over stdio or Streamable HTTP. Reads use server-side IMAP when account credentials are configured and fall back to AppleScript. Mail.app operations run through a resident signed Swift helper over an owner-only Unix socket, so macOS attributes Automation permission to a stable app rather than an ephemeral Python process.
 
-## Tools (25)
-
-Grouped by lifecycle (11 read-only, 14 mutating):
-
-- **Discovery** — `list_accounts`, `list_mailboxes`, `list_rules`, `list_templates`: enumerate what's configured (no external cache — call per account).
-- **Read** — `search_messages`, `get_messages`, `get_thread`, `get_statistics`, `get_attachment_content`, `get_template`, `render_template`: read messages/threads, aggregate inbox stats, pull an attachment's content inline, and render templates.
-- **Message actions** — `update_message` (read/flag/move in one pass), `delete_messages` (→ Trash), `save_attachments` (to disk, byte-capped).
-- **Drafts** — `create_draft` (new / reply / forward, optionally `send_now`), `update_draft`, `delete_draft`.
-- **Mailbox CRUD** — `create_mailbox`, `update_mailbox` (rename or move), `delete_mailbox`.
-- **Rules** — `create_rule`, `update_rule`, `delete_rule`.
-- **Templates (write)** — `save_template`, `delete_template`.
-
-Destructive operations (`delete_*`, `create_rule` with move/forward/delete actions, `create_draft` with `send_now=true`) prompt for confirmation via MCP elicitation. See [docs/reference/TOOLS.md](docs/reference/TOOLS.md) for full parameters and return shapes.
-
-## Prerequisites
-
-- macOS 10.15 (Catalina) or later
-- Python 3.10 or later
-- Apple Mail configured with at least one account
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-
-## Installation
-
-### Claude Desktop — install from file (`.mcpb`)
-
-The lowest-friction path for Claude Desktop: grab the `apple-mail-fast-mcp-<version>.mcpb` bundle from the [Releases](https://github.com/s-morgan-jeffries/apple-mail-fast-mcp/releases) page and open it (or drag it into **Settings → Extensions**). Claude Desktop manages Python and dependencies for you via `uv` — no manual venv, no config JSON to hand-edit. macOS only.
-
-To build the bundle yourself: `./scripts/build-mcpb.sh` → `dist/apple-mail-fast-mcp-<version>.mcpb` (requires Node for the `mcpb` packer).
-
-### Claude Code — install as a plugin
-
-One command in Claude Code, no config JSON:
+The supported remote deployment binds the Python service to `127.0.0.1`, publishes it privately with Tailscale Serve, and requires a bearer token in addition to tailnet membership:
 
 ```text
-/plugin marketplace add s-morgan-jeffries/apple-mail-fast-mcp
-/plugin install apple-mail-fast@apple-mail-fast-mcp
+https://hochi.tailbce39f.ts.net/apple-mail/mcp
 ```
 
-Claude Code launches the server via `uv run` from the plugin directory (resolves dependencies from the bundled `pyproject.toml`/`uv.lock` — no PyPI needed), so you only need `uv` installed. macOS only. See [`docs/reference/TOOLS.md`](docs/reference/TOOLS.md) for IMAP setup and the read/write split.
+Funnel must remain disabled.
 
-### pip / uvx (any MCP client)
+## Requirements
 
-Published on [PyPI](https://pypi.org/project/apple-mail-fast-mcp/):
+- macOS with Apple Mail configured
+- Python 3.14 managed by `uv`
+- Tailscale on devices that use the remote MCP service
+- An IMAP password file or Keychain entry for fast server-side search
+
+## Install on the Mail host
+
+Clone the repository on the Mac and run:
 
 ```bash
-uvx apple-mail-fast-mcp          # zero-install, run on demand
-pip install apple-mail-fast-mcp  # or install the console script
+uv sync --locked
+./scripts/install-macos-launch-agent.sh
 ```
 
-Then point your MCP client at it — the config is a one-liner (no absolute paths):
-
-```json
-{
-  "mcpServers": {
-    "apple-mail": { "command": "uvx", "args": ["apple-mail-fast-mcp"] }
-  }
-}
-```
-
-### From source (development)
+The installer builds the native helper, signs it, validates secret-file permissions, installs both per-user LaunchAgents, and restarts the service. On first install, request Mail Automation from the helper and click **Allow**:
 
 ```bash
-git clone https://github.com/s-morgan-jeffries/apple-mail-fast-mcp.git
-cd apple-mail-fast-mcp
-uv sync --dev
+"$HOME/Applications/Apple Mail MCP Helper.app/Contents/MacOS/AppleMailMCPHelper" \
+  --request-mail-automation
 ```
 
-### Private service over Tailscale
+The current Peacockery deployment reads its IMAP password from `~/.config/apple-mail-fast-mcp/imap-password-peacockery` and its HTTP token from `~/.config/apple-mail-fast-mcp/http-bearer-token`. Both files must be owned by the current user and use mode `0400` or `0600`.
 
-To share one Mac's Mail.app with MCP clients on every device in your tailnet, run the Streamable HTTP transport on loopback and publish it through Tailscale Serve. The repository includes a locked `uv` LaunchAgent installer and the complete setup in [Private remote service on macOS](docs/guides/REMOTE_SERVICE.md).
+See [Private remote service on macOS](docs/guides/REMOTE_SERVICE.md) for Tailscale Serve, client configuration, logs, and verification commands.
 
-## Configuration
+## Run from source
 
-> Skip this section if you installed the `.mcpb` bundle — it wires up Claude Desktop for you. The manual config below is for source installs.
-
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`). `uv sync` installs a console script at `.venv/bin/apple-mail-fast-mcp`; point Claude Desktop at its **absolute path** — it's the most reliable form under Claude Desktop's restricted spawn environment (no reliance on `uv` being on `PATH`):
-
-```json
-{
-  "mcpServers": {
-    "apple-mail": {
-      "command": "/path/to/apple-mail-fast-mcp/.venv/bin/apple-mail-fast-mcp"
-    }
-  }
-}
-```
-
-(Equivalent alternative if you prefer driving it through uv: `"command": "uv", "args": ["--directory", "/path/to/apple-mail-fast-mcp", "run", "apple-mail-fast-mcp"]`.)
-
-### Optional: split read / write servers
-
-Claude Desktop prompts per-tool for permission. If you want to **batch-approve the 9 read tools** (list / search / get) and still gate the 14 mutating tools per call, run the connector twice — once with `--read-only`, once without — under two separate `mcpServers` entries:
-
-```json
-{
-  "mcpServers": {
-    "apple-mail-read": {
-      "command": "/path/to/apple-mail-fast-mcp/.venv/bin/apple-mail-fast-mcp",
-      "args": ["--read-only"]
-    },
-    "apple-mail-write": {
-      "command": "/path/to/apple-mail-fast-mcp/.venv/bin/apple-mail-fast-mcp"
-    }
-  }
-}
-```
-
-The `--read-only` server exposes only the 9 read tools, so Claude Desktop's per-server permission UI naturally groups them. The full server still gates writes individually. Trade-off: 2× connector processes. See [`docs/reference/TOOLS.md`](docs/reference/TOOLS.md) for the per-tool classification and a note on MCP annotation hints (`readOnlyHint` / `destructiveHint` / `idempotentHint`) which forward-compatible hosts may use to provide the same UX without the split.
-
-## Permissions
-
-On first run, macOS will prompt for Automation access. Grant permission in: **System Settings > Privacy & Security > Automation > Terminal (or your IDE)**
-
-## Optional: faster search via IMAP
-
-`search_messages` works out of the box via AppleScript. For large mailboxes (thousands of messages), AppleScript's `whose` clause can take 1–5 seconds per query. If you want faster server-side search, you can enable IMAP delegation per account by adding a Keychain entry.
-
-**How it works.** If credentials exist for an account, the server uses IMAP (fast, server-side SEARCH). Otherwise — or on any IMAP failure (offline, wrong password, timeout) — it silently falls back to AppleScript. You never lose functionality; you only gain speed when IMAP is configured and reachable. Credential lookup checks an owner-only password file first, then the direct environment variable, then Keychain.
-
-**One-time setup per account — the `setup-imap` subcommand walks you through it:**
+The console script is the only application entry point:
 
 ```bash
-apple-mail-fast-mcp setup-imap --account iCloud
+uv run apple-mail-fast-mcp
 ```
 
-Substitute the Mail.app account name exactly — whatever it's labeled in Mail.app (e.g. `iCloud`, `Gmail`, `"Yahoo!"`). The guided flow (#384):
-
-- **detects your provider** from the account's IMAP host and points you at the right app-password page — **iCloud** ([account.apple.com](https://account.apple.com/account/manage) → App-Specific Passwords), **Gmail** ([myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)), **Yahoo**, **Outlook**, **Fastmail** (generic guidance for anything else) — with the provider's 2FA steps, and **offers to open the page** in your browser;
-- explains that this is a **scoped, revocable app-specific password** — limited to that one account — unlike granting full disk access;
-- looks up the account's primary email from Mail.app (override with `--email`, which is **persisted** so runtime uses the same login — see the iCloud quirk below);
-- reads the IMAP **host and port** from Mail.app; if either is wrong — some institutional servers (e.g. Zimbra) scriptably misreport the port as `143` for a server actually on `993`, so the implicit-TLS handshake fails with `WRONG_VERSION_NUMBER` — override with `--host` / `--port <993>`, which are **persisted** so runtime connects to the same coordinates (#405);
-- prompts via `getpass` so the password never lands in shell history;
-- writes to Keychain at `apple-mail-fast-mcp.imap.<account>` (idempotent — re-running with a new password updates the entry; pre-rename `apple-mail-mcp.imap.` entries still resolve via a read-through fallback removed at 1.0.0);
-- opens an IMAP connection and runs a real LOGIN to confirm the password works. On rejection it **rolls back the Keychain entry and lets you paste again** (up to 3 tries) so a bad password never leaves a broken item behind.
-
-If you see a one-time "security wants to use the 'login' keychain" prompt on the next IMAP-backed call, click **Always Allow**.
-
-To remove the entry later: `apple-mail-fast-mcp setup-imap --account iCloud --uninstall`.
-
-### Password-file and environment fallbacks
-
-Background services can keep the password in an owner-only file rather than Keychain or the process environment. Set this variable to an absolute path:
-
-```text
-APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_<SUFFIX>
-```
-
-The target must be a regular, non-symlink file owned by the current user with mode `0400` or `0600`. A configured missing or unsafe file fails closed. The file source takes precedence over the direct environment variable and Keychain.
-
-Some contexts have no usable Keychain: `uvx` runs (ephemeral binary paths break the Keychain ACL, causing re-prompts or failures), Docker / CI (no Keychain at all), and background services (the ACL prompt blocks forever with no UI attached). For those, you can supply the IMAP password via an environment variable instead:
-
-```text
-APPLE_MAIL_MCP_IMAP_PASSWORD_<SUFFIX>
-```
-
-`<SUFFIX>` is the Mail.app account name **uppercased**, with each run of non-alphanumeric characters collapsed to a single underscore and leading/trailing underscores trimmed:
-
-| Account name | Environment variable                    |
-| ------------ | --------------------------------------- |
-| `iCloud`     | `APPLE_MAIL_MCP_IMAP_PASSWORD_ICLOUD`   |
-| `Gmail`      | `APPLE_MAIL_MCP_IMAP_PASSWORD_GMAIL`    |
-| `Yahoo!`     | `APPLE_MAIL_MCP_IMAP_PASSWORD_YAHOO`    |
-| `My Gmail`   | `APPLE_MAIL_MCP_IMAP_PASSWORD_MY_GMAIL` |
-
-When set to a non-empty value and no password file is configured, the env var is used **in preference to** any Keychain entry for that account. An empty or whitespace-only value is ignored and the Keychain path is used. The lookup composes with the name↔UUID fallback, so a file or env var keyed on the account name is still found when a caller passes the account's UUID.
-
-> ⚠️ **Security tradeoff.** Direct secret environment variables are far less private than a locked password file or Keychain: they can be visible through process introspection and crash dumps and are easy to leak into logs or shell history. Prefer the password-file form for persistent background services.
->
-> Caveat: the name→suffix mapping isn't reversible — `Yahoo!` and `Yahoo` both map to `YAHOO`, and an account name with no ASCII letters/digits has no env-var form (use the Keychain for those).
-
-**Verifying the setup.** The `setup-imap` command does this for you. If you want to spot-check post-hoc:
+For a local HTTP process:
 
 ```bash
-uv run python -c "from apple_mail_fast_mcp.mail_connector import AppleMailConnector; \
-    print(AppleMailConnector().search_messages(account='<ACCOUNT_NAME>', limit=1))"
+uv run apple-mail-fast-mcp \
+  --transport http \
+  --listen-host 127.0.0.1 \
+  --listen-port 8765 \
+  --http-path /mcp \
+  --bearer-token-file ~/.config/apple-mail-fast-mcp/http-bearer-token
 ```
 
-If IMAP is working, the call returns in ~1 second. If it logs a WARNING about falling back (visible with `--log-level=DEBUG`), check that the account name matches Mail.app's account name exactly and that the email in your Keychain entry matches what `email addresses of account` returns.
+## Tool surface
 
-**Known provider quirks.**
+The server exposes account, mailbox, message, attachment, rule, template, and draft lifecycle operations. Destructive operations retain MCP confirmation gates. Immediate send uses the configured account’s SMTP submission path; inbound mail and search remain independent through Mail.app and IMAP.
 
-- **iCloud:** the IMAP server accepts `@icloud.com` / `@me.com` aliases as LOGIN username, not the Apple ID email. The server (and `setup-imap`) reads `email addresses of account` from Mail.app for that reason. If your iCloud Apple ID is a *third-party* address (e.g. a `@gmail.com` Apple ID) **and** Mail.app reports no `@icloud.com` address for the account, auto-detection can't find the right login — `setup-imap` will fail with a hint to re-run with `--email <your @icloud.com/@me.com address>`. That `--email` value is **persisted** (in `~/.apple_mail_mcp/imap_login_overrides.json`) so runtime resolution uses the same login (#341). It's a general override — use it for any account whose auto-detected IMAP login is wrong.
-- **Yahoo:** app passwords have been progressively deprecated; the option may not be available for all accounts. If Yahoo's account-security page doesn't show the option, IMAP setup isn't possible for that account and AppleScript is the only path.
-- **Gmail:** requires 2-Step Verification enabled. If your Google Workspace admin has disabled app passwords at the tenant level, IMAP setup isn't possible for that account.
-- **Gmail thread retrieval — All Mail visibility tradeoff.** `find_thread_members` (used internally by thread-aware queries) is fastest when `[Gmail]/All Mail` is exposed over IMAP — that path is ~5 round-trips, mailbox-count-independent. Many users hide All Mail (Gmail Settings → Forwarding and POP/IMAP → Folder size limits → "Do not show in IMAP") because it duplicates every message. When hidden, the connector falls back to a per-mailbox X-GM-THRID iteration (still ~6× faster than the universal BFS, but proportional to your label count — ~25s on a 92-label account). Expose All Mail if you want the headline speed; keep it hidden if you prefer the cleaner IMAP folder list.
-
-**Write operations** (`create_draft`, `update_draft`, including the `send_now=true` send path) always use AppleScript regardless of IMAP configuration — these need Mail.app's compose UI.
+The complete request and response contracts are in [Tools](docs/reference/TOOLS.md). The implementation split is documented in [Architecture](docs/reference/ARCHITECTURE.md).
 
 ## Development
 
 ```bash
-# Setup
-uv sync --dev
-
-# Common commands
-make test              # Run unit tests
-make lint              # Lint with ruff
-make typecheck         # Type check with mypy
-make check-all         # All checks (lint, typecheck, test, complexity, version-sync, parity)
-make coverage          # Coverage report
-make test-integration  # Integration tests (requires Mail.app)
-
-# Validation scripts
-./scripts/check_version_sync.sh          # Version consistency
-./scripts/check_client_server_parity.sh  # Connector-server alignment
-./scripts/check_complexity.sh            # Cyclomatic complexity
-./scripts/check_applescript_safety.sh    # AppleScript safety audit
+uv sync
+just check
 ```
 
-### Branch Convention
+`just check` runs Ruff with `ALL`, Ruff formatting, `ty`, Vulture, the test-policy and API-parity checks, documentation and AppleScript safety checks, the regression suite, `uv audit --locked`, and `uv build`.
 
-`{type}/issue-{num}-{description}` — e.g., `feature/issue-42-thread-support`
+The repository intentionally has only two test categories:
 
-## Architecture
+- `tests/regressions`: a test must identify the issue or real bug it prevents.
+- `tests/live`: a test must touch real Apple Mail, AppleScript, IMAP, SMTP, or MCP transport behavior.
 
-```text
-server.py (FastMCP tools — thin orchestration, validation, elicitation gates)
-  -> mail_connector.py (dispatch + domain logic)
-     -> AppleScript path:  subprocess.run(["osascript", ...]) -> Apple Mail.app   (universal baseline)
-     -> IMAP fast path:    imap_connector.py -> the account's IMAP server          (when hinted + Keychain creds)
+Run live tests only against an explicit expendable account:
+
+```bash
+MAIL_TEST_ACCOUNT=Peacockery just live
 ```
 
-**Dispatch model.** AppleScript is the always-available baseline. When a read/mutation call supplies an `account` (and, where relevant, `mailbox`) hint **and** the account has Keychain IMAP credentials, the connector takes a server-side IMAP fast path; on any IMAP failure it falls back to AppleScript, so you never lose functionality — you only gain speed. See [docs/reference/ARCHITECTURE.md](docs/reference/ARCHITECTURE.md) for the full dispatch model, the dual-emit message-ID scheme, the drafts lifecycle, and the IMAP thread tiers.
+The real outbound delivery check is separately gated because it sends an actual message and waits for it to reach the selected inbox:
 
-- **server.py** — MCP tool registration, input validation, confirmation (elicitation) gates, response formatting
-- **mail_connector.py** — AppleScript generation/execution + IMAP-fast-path dispatch
-- **imap_connector.py** — IMAP client + connection pool (search, fetch, bulk-mutation fast paths)
-- **security.py** — Input sanitization, audit logging, confirmation flows
-- **utils.py** — Pure functions: escaping, parsing, validation
-- **exceptions.py** — Typed exception hierarchy
+```bash
+MAIL_TEST_ACCOUNT=Peacockery \
+MAIL_LIVE_RECIPIENT=ci@peacockery.studio \
+just live-send
+```
+
+See [Testing](docs/guides/TESTING.md) and [Development](docs/guides/DEVELOPMENT.md) for the exact policy.
 
 ## Security
 
-- Local execution only (no cloud processing)
-- Uses existing Mail.app authentication; IMAP app-passwords (opt-in) live in the macOS Keychain, never in the repo or config
-- All inputs sanitized and AppleScript-escaped (defense against AppleScript injection)
-- Destructive operations require user confirmation via MCP elicitation; rate limits + audit logging on top
-- `save_attachments` is byte-capped (per-attachment + aggregate) against disk-fill DoS
+The HTTP listener remains loopback-only, Tailscale supplies the private network boundary, and every HTTP request also needs the owner-only bearer token. Browser-originated requests are rejected. The helper socket validates ownership and peer UID, and a configured but invalid socket fails closed.
 
-Docs:
-
-- [SECURITY.md](SECURITY.md) — vulnerability-reporting policy
-- [docs/SECURITY.md](docs/SECURITY.md) — user-facing security posture & privacy
-- [docs/guides/THREAT_MODEL.md](docs/guides/THREAT_MODEL.md) — STRIDE trust-boundary analysis
-- [docs/guides/SECURITY_CHECKLIST.md](docs/guides/SECURITY_CHECKLIST.md) — per-feature contributor checklist
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow, coding standards, and PR process.
-
-## License
-
-[MIT](LICENSE)
+See [Threat model](docs/guides/THREAT_MODEL.md) and [Security checklist](docs/guides/SECURITY_CHECKLIST.md).

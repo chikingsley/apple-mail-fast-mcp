@@ -27,6 +27,8 @@
   <string>/Users/Shared/apple-mail-fast-mcp</string>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>APPLE_MAIL_MCP_APPLESCRIPT_SOCKET</key>
+    <string>__APPLE_MAIL_MCP_APPLESCRIPT_SOCKET__</string>
     <key>APPLE_MAIL_MCP_IMAP_POOL</key>
     <string>1</string>
     <key>APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_PEACOCKERY</key>

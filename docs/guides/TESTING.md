@@ -1,103 +1,45 @@
-# Testing Guide
+# Testing
 
-## Test Levels
+The suite protects behavior, not a coverage percentage. `scripts/check_test_policy.py` rejects tests outside the two supported categories and rejects regression tests that do not identify an issue, bug, or regression.
 
-| Level | Command | Purpose |
-|-------|---------|---------|
-| Unit | `make test` | Python logic with mocked AppleScript (~1s) — **in CI** |
-| Integration | `make test-integration` | Real Mail.app operations — local only |
-| E2E | `make test-e2e` | FastMCP dispatch layer — local only |
-| Benchmarks | `make benchmark` | Performance regression detection (opt-in) — see [BENCHMARKING.md](BENCHMARKING.md) |
-| Blind agent eval | (see below) | Whether models can use the tools from descriptions alone — see [`evals/agent_tool_usability/`](../../evals/agent_tool_usability/) |
+## Regressions
 
-**CI runs unit tests only.** Integration / e2e / benchmark tests need real Mail.app (and, for some,
-IMAP credentials), so CI can't run them — they're manual. See **Manual e2e policy** below.
-
-### E2E Scope
-
-`make test-e2e` covers two layers:
-
-1. **In-process FastMCP dispatch** ([tests/e2e/test_mcp_tools.py](../../tests/e2e/test_mcp_tools.py)) — tool registration, schemas, and happy-path invocation across the tool set, with the connector mocked. (Elicitation-gated tools are run with a patched accept so the happy-path exercises dispatch, not the confirmation flow.)
-2. **Real stdio transport** ([tests/e2e/test_stdio_transport.py](../../tests/e2e/test_stdio_transport.py)) — spawns the server as a subprocess, completes the MCP handshake over stdio, and asserts `list_tools` returns the full tool set. Catches startup errors, banner/stdout contamination, and JSON-RPC framing bugs that the in-process layer cannot surface.
-
-### Manual e2e policy
-
-CI does not run e2e (it needs Mail.app). **If your PR touches IMAP or AppleScript code paths** —
-`imap_connector.py`, `mail_connector.py` AppleScript bodies/wrappers, or any tool gated by
-`_elicit_confirmation` — run `make test-e2e` (and, where relevant, `make test-integration`) **before
-pushing**. A stale e2e failure on `main` is only caught by someone running it locally. `make
-test-e2e` is also a mandatory pre-release gate.
-
-## Running Tests
+`tests/regressions` contains small deterministic checks for previously observed failures. The normal command runs this category only:
 
 ```bash
-# All unit tests (default)
-make test
-
-# With coverage report
-make coverage
-
-# Integration tests (requires Mail.app)
-MAIL_TEST_ACCOUNT="Gmail" make test-integration
-
-# Specific test file
-uv run pytest tests/unit/test_utils.py -v
+just test
 ```
 
-**Safety gate.** Integration/e2e runs that go through `server.py` tools set `MAIL_TEST_MODE=true`
-(the `make` targets do this) and `MAIL_TEST_ACCOUNT=<account>`. The gate (`check_test_mode_safety` in
-`security.py`) blocks destructive operations on any account other than the designated test account
-and blocks sends to non-reserved recipient domains (must be `@example.com`, `.test`, `.invalid`,
-`.localhost`, …). Point `MAIL_TEST_ACCOUNT` at an account you don't mind being mutated — integration
-benchmarks move real messages into an isolated bench mailbox and drain them back.
+A new regression must explain what broke and include an issue number or explicit bug/regression wording in its own name or docstring. Do not add routine happy-path permutations, generated edge-case matrices, or tests solely to execute uncovered lines.
 
-## Writing Tests
+The real stdio handshake belongs here because it pins transport regression #50 without pretending that mocked tool calls are end-to-end behavior.
 
-### Unit Tests
+## Live behavior
 
-Mock at the `_run_applescript()` boundary:
+`tests/live` talks to real AppleScript, Mail.app, IMAP, SMTP, or MCP boundaries. It is disabled unless `--run-live` is present, and account-changing tests also require `MAIL_TEST_ACCOUNT`:
 
-```python
-from unittest.mock import patch, MagicMock
-from apple_mail_fast_mcp.mail_connector import AppleMailConnector
-
-class TestMyFeature:
-    @pytest.fixture
-    def connector(self) -> AppleMailConnector:
-        return AppleMailConnector(timeout=30)
-
-    @patch.object(AppleMailConnector, "_run_applescript")
-    def test_my_method(self, mock_run, connector):
-        mock_run.return_value = "expected|output"
-        result = connector.my_method("param")
-        assert result == expected
+```bash
+MAIL_TEST_ACCOUNT=Peacockery just live
 ```
 
-### Integration Tests
+Live tests may create and remove drafts, rules, messages, and fixture mailboxes. Use an account where those mutations are acceptable. `MAIL_TEST_MODE=true` restricts account-gated operations to `MAIL_TEST_ACCOUNT` and prevents ordinary sends.
 
-```python
-pytestmark = pytest.mark.skipif(
-    "not config.getoption('--run-integration')",
-    reason="Integration tests disabled by default."
-)
+## Real send and delivery
 
-def test_real_operation(self, connector):
-    result = connector.list_mailboxes("Gmail")
-    assert isinstance(result, list)
+The outbound test has a second command-line gate and requires an explicit recipient routed back to the selected inbox:
+
+```bash
+MAIL_TEST_ACCOUNT=Peacockery \
+MAIL_LIVE_RECIPIENT=ci@peacockery.studio \
+just live-send
 ```
 
-### Test Organization
+The test submits one real message through the account’s SMTP path and polls `MAIL_LIVE_MAILBOX` (default `INBOX`) for up to `MAIL_LIVE_DELIVERY_TIMEOUT` seconds (default `90`). It skips unless both `--run-send-live` and `MAIL_LIVE_RECIPIENT` are present.
 
-Each test file follows:
-1. Fixtures (connector instance)
-2. Happy path tests
-3. Filter/parameter tests
-4. Error handling tests
-5. Edge cases
-6. Security tests (dedicated class per feature)
+## Full local gate
 
-## Coverage
+```bash
+just check
+```
 
-- Target: 90%
-- Enforced: `fail_under = 90` in pyproject.toml
-- Run `make coverage` for the current report.
+This runs linting, formatting, static typing, dead-code detection, repository policy checks, the regression suite, vulnerability auditing, and a local package build. A green regression suite does not prove the live macOS deployment; run the relevant live command after changes to AppleScript, IMAP, SMTP, the native helper, or the remote transport.

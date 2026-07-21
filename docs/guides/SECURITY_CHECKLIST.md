@@ -43,13 +43,13 @@ This rejects `..`, slashes, dots, spaces, control characters, and oversized leng
 
 Every MCP tool wrapper in [`server.py`](../../src/apple_mail_fast_mcp/server.py) must call [`check_rate_limit`](../../src/apple_mail_fast_mcp/security.py#L180) as its first action and return immediately if the call is rate-limited. The tool name must be registered in [`OPERATION_TIERS`](../../src/apple_mail_fast_mcp/security.py#L122) under one of three tiers:
 
-| Tier | Cap | Use for |
-|------|-----|---------|
-| `cheap_reads` | 60 / 60s | List/get/render operations; local file I/O |
+| Tier            | Cap      | Use for                                                  |
+| --------------- | -------- | -------------------------------------------------------- |
+| `cheap_reads`   | 60 / 60s | List/get/render operations; local file I/O               |
 | `expensive_ops` | 20 / 60s | Search, mutations on Mail.app state, multi-mailbox scans |
-| `sends` | 3 / 60s | Anything that delivers email externally |
+| `sends`         | 3 / 60s  | Anything that delivers email externally                  |
 
-There's a unit test in [`test_security.py`](../../tests/unit/test_security.py) (`test_all_operations_have_tier_assigned`) that fails if a registered MCP tool isn't in `OPERATION_TIERS` — adding a new tool without picking a tier breaks the build, by design.
+Security regressions live in [`test_security.py`](../../tests/regressions/test_security.py). Any new tool must preserve the operation-tier and confirmation invariants enforced by the server and repository checks.
 
 ## Audit logging
 

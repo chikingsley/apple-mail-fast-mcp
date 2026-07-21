@@ -26,9 +26,12 @@ import logging
 import smtplib
 import ssl
 from email import message_from_bytes
-from email.message import Message
 from email.policy import default as _default_policy
 from email.utils import parseaddr
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from email.message import Message
 
 logger = logging.getLogger(__name__)
 
@@ -153,15 +156,13 @@ class SmtpSender:
                     self._authenticate_and_send(client, msg, recipients, env_from)
                     accepted = True
             else:
-                with smtplib.SMTP(
-                    self._host, self._port, timeout=self._timeout
-                ) as client:
+                with smtplib.SMTP(self._host, self._port, timeout=self._timeout) as client:
                     client.ehlo()
                     client.starttls(context=context)
                     client.ehlo()
                     self._authenticate_and_send(client, msg, recipients, env_from)
                     accepted = True
-        except (smtplib.SMTPException, OSError):
+        except smtplib.SMTPException, OSError:
             # Not yet accepted → a real send failure; propagate so the caller
             # falls back to AppleScript. Already accepted → the message is
             # out; the only thing left to fail is session teardown (e.g. a
@@ -198,7 +199,7 @@ class SmtpSender:
             ValueError: Neither an override nor a parseable ``From:`` address
                 is available.
         """
-        source = override if override else msg.get("From", "")
+        source = override or msg.get("From", "")
         address = parseaddr(source)[1]
         if not address:
             raise ValueError(

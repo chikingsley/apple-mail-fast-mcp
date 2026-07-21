@@ -8,7 +8,7 @@ import re
 import subprocess
 import time
 from collections import deque
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
@@ -35,13 +35,13 @@ class OperationLogger:
             result: Result status (success/failure/cancelled)
         """
         entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "operation": operation,
             "parameters": parameters,
             "result": result,
         }
         self.operations.append(entry)
-        logger.info(f"Operation logged: {operation} - {result}")
+        logger.info("Operation logged: %s - %s", operation, result)
 
     def get_recent_operations(self, limit: int = 10) -> list[dict[str, Any]]:
         """
@@ -58,7 +58,6 @@ class OperationLogger:
 
 # Global operation logger instance
 operation_logger = OperationLogger()
-
 
 
 def validate_send_operation(
@@ -218,11 +217,35 @@ def validate_attachment_type(filename: str, allow_executables: bool = False) -> 
     """
     # Dangerous executable extensions (block by default)
     dangerous_extensions = {
-        '.exe', '.bat', '.cmd', '.com', '.scr', '.pif',
-        '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh',
-        '.msi', '.msp', '.scf', '.lnk', '.inf', '.reg',
-        '.ps1', '.psm1', '.app', '.deb', '.rpm', '.sh',
-        '.bash', '.csh', '.ksh', '.zsh', '.command'
+        ".exe",
+        ".bat",
+        ".cmd",
+        ".com",
+        ".scr",
+        ".pif",
+        ".vbs",
+        ".vbe",
+        ".js",
+        ".jse",
+        ".wsf",
+        ".wsh",
+        ".msi",
+        ".msp",
+        ".scf",
+        ".lnk",
+        ".inf",
+        ".reg",
+        ".ps1",
+        ".psm1",
+        ".app",
+        ".deb",
+        ".rpm",
+        ".sh",
+        ".bash",
+        ".csh",
+        ".ksh",
+        ".zsh",
+        ".command",
     }
 
     filename_lower = filename.lower()
@@ -276,7 +299,7 @@ def validate_attachment_size(size_bytes: int, max_size: int = 25 * 1024 * 1024) 
 # (label, compiled regex, high_signal). `label` is what surfaces to the agent
 # (readable, not the raw regex). `high_signal` patterns indicate manipulation /
 # exfiltration / secrecy and escalate risk_level to "high".
-_INJECTION_PATTERNS: list[tuple[str, "re.Pattern[str]", bool]] = [
+_INJECTION_PATTERNS: list[tuple[str, re.Pattern[str], bool]] = [
     (
         "ignore previous instructions",
         re.compile(
@@ -358,11 +381,9 @@ _INJECTION_PATTERNS: list[tuple[str, "re.Pattern[str]", bool]] = [
 
 def _injection_scan_enabled() -> bool:
     """Prompt-injection scanning is on by default; opt out in trusted
-    environments with APPLE_MAIL_MCP_DISABLE_INJECTION_SCAN=true."""
-    return (
-        os.environ.get("APPLE_MAIL_MCP_DISABLE_INJECTION_SCAN", "").lower()
-        != "true"
-    )
+    environments with APPLE_MAIL_MCP_DISABLE_INJECTION_SCAN=true.
+    """
+    return os.environ.get("APPLE_MAIL_MCP_DISABLE_INJECTION_SCAN", "").lower() != "true"
 
 
 def detect_prompt_injection(text: str) -> dict[str, Any] | None:
@@ -452,19 +473,19 @@ def _get_test_account_identifiers(test_account_name: str) -> frozenset[str]:
             [
                 "/usr/bin/osascript",
                 "-e",
-                f'tell application "Mail" to return id of account '
-                f'"{test_account_name}"',
+                f'tell application "Mail" to return id of account "{test_account_name}"',
             ],
             capture_output=True,
-            text=True,
             check=False,
+            text=True,
             timeout=5,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
         logger.warning(
             "Test-mode safety gate: failed to resolve UUID for account %r "
             "(%s); falling back to name-only matching",
-            test_account_name, exc,
+            test_account_name,
+            exc,
         )
         return frozenset(identifiers)
 
@@ -476,7 +497,9 @@ def _get_test_account_identifiers(test_account_name: str) -> frozenset[str]:
         logger.warning(
             "Test-mode safety gate: failed to resolve UUID for account %r "
             "(exit %d): %s; falling back to name-only matching",
-            test_account_name, result.returncode, result.stderr.strip(),
+            test_account_name,
+            result.returncode,
+            result.stderr.strip(),
         )
     return frozenset(identifiers)
 
@@ -496,9 +519,7 @@ def _is_reserved_test_domain(email: str) -> bool:
 
 
 def _safety_error(operation: str, message: str) -> dict[str, Any]:
-    operation_logger.log_operation(
-        operation, {"violation": message}, "safety_violation"
-    )
+    operation_logger.log_operation(operation, {"violation": message}, "safety_violation")
     return {
         "success": False,
         "error": message,
@@ -539,22 +560,24 @@ def check_test_mode_safety(
         if account not in _get_test_account_identifiers(test_account):
             return _safety_error(
                 operation,
-                f"Test mode: account '{account}' does not match "
-                f"MAIL_TEST_ACCOUNT='{test_account}'",
+                f"Test mode: account '{account}' does not match MAIL_TEST_ACCOUNT='{test_account}'",
             )
 
     # Rule-mutation operations: verify the target rule's name starts with
     # the test prefix. The caller (server tool wrapper) is responsible for
     # resolving rule_index → rule_name before calling, since the safety gate
     # has no Mail.app access of its own.
-    if operation in RULE_GATED_OPERATIONS and rule_name is not None:
-        if not rule_name.startswith(RULE_TEST_PREFIX):
-            return _safety_error(
-                operation,
-                f"Test mode: rule mutations are restricted to rules whose "
-                f"name starts with {RULE_TEST_PREFIX!r}. Got rule_name="
-                f"{rule_name!r}.",
-            )
+    if (
+        operation in RULE_GATED_OPERATIONS
+        and rule_name is not None
+        and not rule_name.startswith(RULE_TEST_PREFIX)
+    ):
+        return _safety_error(
+            operation,
+            f"Test mode: rule mutations are restricted to rules whose "
+            f"name starts with {RULE_TEST_PREFIX!r}. Got rule_name="
+            f"{rule_name!r}.",
+        )
 
     # Send operations: verify every recipient is on a reserved test domain.
     if operation in SEND_OPERATIONS:

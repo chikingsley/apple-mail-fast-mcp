@@ -5,7 +5,10 @@ Utility functions for Apple Mail MCP.
 import base64
 import json
 import re
+from pathlib import Path
 from typing import Any
+
+from .exceptions import MailAppleScriptError
 
 _UUID_RE = re.compile(
     r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
@@ -84,11 +87,11 @@ def parse_applescript_list(result: str) -> list[str]:
     Returns:
         List of strings
     """
-    if not result or result == "":
+    if not result:
         return []
 
     # Handle empty list
-    if result.strip() in ["{}", ""]:
+    if result.strip() in {"{}", ""}:
         return []
 
     # Remove braces if present
@@ -97,8 +100,7 @@ def parse_applescript_list(result: str) -> list[str]:
         result = result[1:-1]
 
     # Split by comma and clean up
-    items = [item.strip() for item in result.split(",") if item.strip()]
-    return items
+    return [item.strip() for item in result.split(",") if item.strip()]
 
 
 def format_applescript_list(items: list[str]) -> str:
@@ -155,9 +157,7 @@ def address_domain(address: str) -> str:
     return address.rsplit("@", 1)[1].lower()
 
 
-def rank_senders(
-    rows: list[dict[str, Any]], by: str, limit: int
-) -> list[dict[str, Any]]:
+def rank_senders(rows: list[dict[str, Any]], by: str, limit: int) -> list[dict[str, Any]]:
     """Aggregate ``search_messages`` rows into a ranked sender list. (#378)
 
     Groups by full address (``by="address"``) or domain (``by="domain"``),
@@ -263,9 +263,6 @@ def sanitize_filename(filename: str) -> str:
         >>> sanitize_filename("my-file_v2.txt")
         'my-file_v2.txt'
     """
-    import re
-    from pathlib import Path
-
     # Remove null bytes
     filename = filename.replace("\x00", "")
 
@@ -274,18 +271,18 @@ def sanitize_filename(filename: str) -> str:
 
     # Replace dangerous characters with underscore
     # Keep: letters, numbers, dash, underscore, period
-    filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+    filename = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
 
     # Remove leading dots (hidden files)
-    filename = filename.lstrip('.')
+    filename = filename.lstrip(".")
 
     # Limit length
     max_length = 255
     if len(filename) > max_length:
         # Preserve extension
-        name, ext = filename.rsplit('.', 1) if '.' in filename else (filename, '')
+        name, ext = filename.rsplit(".", 1) if "." in filename else (filename, "")
         if ext:
-            name = name[:max_length - len(ext) - 1]
+            name = name[: max_length - len(ext) - 1]
             filename = f"{name}.{ext}"
         else:
             filename = filename[:max_length]
@@ -313,8 +310,6 @@ def sanitize_mailbox_name(name: str) -> str:
         >>> sanitize_mailbox_name("../../../etc")
         ''
     """
-    import re
-
     # Remove null bytes
     name = name.replace("\x00", "")
 
@@ -324,12 +319,10 @@ def sanitize_mailbox_name(name: str) -> str:
     name = name.replace("\\", "")
 
     # Remove dangerous characters but keep spaces, dashes, underscores
-    name = re.sub(r'[<>:"|?*]', '', name)
+    name = re.sub(r'[<>:"|?*]', "", name)
 
     # Trim whitespace
-    name = name.strip()
-
-    return name
+    return name.strip()
 
 
 def is_gmail_system_label(name: str) -> bool:
@@ -403,8 +396,7 @@ def get_flag_index(color: str) -> int:
     color_lower = color.lower()
     if color_lower not in color_map:
         raise ValueError(
-            f"Invalid flag color: {color}. "
-            f"Valid colors: {', '.join(color_map.keys())}"
+            f"Invalid flag color: {color}. Valid colors: {', '.join(color_map.keys())}"
         )
 
     return color_map[color_lower]
@@ -431,11 +423,9 @@ def parse_applescript_json(result: str) -> Any:
         MailAppleScriptError: If the result starts with "ERROR:".
         json.JSONDecodeError: If the result is neither an error nor valid JSON.
     """
-    from .exceptions import MailAppleScriptError
-
     stripped = result.strip()
     if stripped.startswith("ERROR:"):
-        raise MailAppleScriptError(stripped[len("ERROR:"):].strip())
+        raise MailAppleScriptError(stripped[len("ERROR:") :].strip())
     return json.loads(stripped)
 
 
@@ -463,7 +453,7 @@ def normalize_subject(subject: str) -> str:
         changed = False
         for prefix in _REPLY_PREFIXES:
             if s.lower().startswith(prefix):
-                s = s[len(prefix):].lstrip()
+                s = s[len(prefix) :].lstrip()
                 changed = True
                 break
     return s
@@ -559,7 +549,7 @@ def coerce_json_list(v: Any) -> Any:
             return []
         try:
             parsed = json.loads(s)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return [v]
         return parsed if isinstance(parsed, list) else [v]
     return v
@@ -576,7 +566,7 @@ def coerce_json_dict(v: Any) -> Any:
     if isinstance(v, str):
         try:
             parsed = json.loads(v)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return v
         return parsed if isinstance(parsed, dict) else v
     return v
@@ -590,9 +580,7 @@ def is_apple_hosted_address(address: str) -> bool:
     ``@mac.com``). Used by ``_resolve_imap_config`` to pick the right IMAP
     login when an iCloud account's Apple ID is a third-party email (#299).
     """
-    return address.strip().lower().endswith(
-        ("@icloud.com", "@me.com", "@mac.com")
-    )
+    return address.strip().lower().endswith(("@icloud.com", "@me.com", "@mac.com"))
 
 
 def is_icloud_imap_host(host: str) -> bool:
@@ -615,14 +603,12 @@ def is_texty_mime(mime_type: str) -> bool:
     m = (mime_type or "").strip().lower()
     if m.startswith("text/"):
         return True
-    if m in ("application/json", "application/xml"):
+    if m in {"application/json", "application/xml"}:
         return True
-    return m.endswith("+json") or m.endswith("+xml")
+    return m.endswith(("+json", "+xml"))
 
 
-def attachment_content_encoding(
-    payload: bytes, mime_type: str
-) -> tuple[str, str]:
+def attachment_content_encoding(payload: bytes, mime_type: str) -> tuple[str, str]:
     """Encode attachment bytes for inline return (#250).
 
     Returns ``(content, encoding)``. For texty MIME types

@@ -22,6 +22,7 @@ user-controlled input cannot escape the drafts directory.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -60,9 +61,7 @@ class SeedRecord:
 
 def _validate_draft_id(draft_id: str) -> None:
     if not isinstance(draft_id, str) or not _DRAFT_ID_RE.fullmatch(draft_id):
-        raise MailDraftInvalidIdError(
-            f"draft_id {draft_id!r} must match {_DRAFT_ID_RE.pattern}"
-        )
+        raise MailDraftInvalidIdError(f"draft_id {draft_id!r} must match {_DRAFT_ID_RE.pattern}")
 
 
 def default_root() -> Path:
@@ -99,11 +98,11 @@ class DraftStateStore:
             return None
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             return None
         kind = data.get("seed_kind")
         seed_id = data.get("seed_id")
-        if kind not in ("reply", "forward"):
+        if kind not in {"reply", "forward"}:
             return None
         if not isinstance(seed_id, str) or not seed_id:
             return None
@@ -125,7 +124,5 @@ class DraftStateStore:
     def delete(self, draft_id: str) -> None:
         """Remove the state file for ``draft_id``. Idempotent."""
         path = self._path_for(draft_id)
-        try:
+        with contextlib.suppress(FileNotFoundError):
             path.unlink()
-        except FileNotFoundError:
-            pass

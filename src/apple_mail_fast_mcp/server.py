@@ -4,6 +4,7 @@ FastMCP server for Apple Mail integration.
 
 import argparse
 import atexit
+import contextlib
 import hmac
 import logging
 import os
@@ -18,6 +19,7 @@ from fastmcp import Context, FastMCP
 from fastmcp.server.elicitation import AcceptedElicitation
 from pydantic import BeforeValidator
 
+from .cli import run_setup_imap
 from .drafts import DraftStateStore, SeedRecord
 from .exceptions import (
     MailAccountNotFoundError,
@@ -71,6 +73,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 # Read-only mode (#217). The connector can be launched with `--read-only`
 # to skip registration of the 14 mutating tools so Claude Desktop users can
 # run two server entries side-by-side and batch-approve the read-only one.
@@ -110,9 +113,7 @@ Send = Callable[[Message], Awaitable[None]]
 ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 
 
-def _tool(
-    annotations: dict[str, Any], *, mutating: bool = False
-) -> Callable[[F], F]:
+def _tool(annotations: dict[str, Any], *, mutating: bool = False) -> Callable[[F], F]:
     """Annotation-aware tool decorator that gates registration on `_READ_ONLY`.
 
     `mutating=True` tools are skipped when the server was launched with
@@ -127,19 +128,20 @@ def _tool(
 
     return wrap
 
+
 # Initialize mail connector. Pool is opt-in via APPLE_MAIL_MCP_IMAP_POOL=1
 # (default off, per #75 acceptance criteria — keep per-call lifecycle the
-# default until benchmarks prove the speedup is worth the lifecycle
-# complexity, then a follow-up can flip the default).
+# default until live measurements prove the speedup is worth the lifecycle
+# complexity).
 def _build_imap_pool() -> ImapConnectionPool | None:
     """Build an ImapConnectionPool when the opt-in env var is set.
 
     Pooling stays opt-in per #75's acceptance criteria: per-call lifecycle
-    is the default until benchmarks prove the speedup is worth the
-    lifecycle complexity, then a follow-up can flip the default."""
-    import os
+    is the default until live measurements prove the speedup is worth the
+    lifecycle complexity.
+    """
     flag = os.getenv("APPLE_MAIL_MCP_IMAP_POOL", "0").strip().lower()
-    if flag in ("1", "true", "yes", "on"):
+    if flag in {"1", "true", "yes", "on"}:
         logger.info("IMAP connection pool enabled (APPLE_MAIL_MCP_IMAP_POOL)")
         return ImapConnectionPool()
     return None
@@ -149,7 +151,8 @@ def _register_pool_atexit(pool: ImapConnectionPool | None) -> None:
     """Register ``pool.close()`` as an atexit hook so cached IMAP sessions
     get a clean LOGOUT on process exit instead of an abnormal disconnect
     (#127). No-op when ``pool`` is ``None`` (the default — pool is opt-in
-    via ``APPLE_MAIL_MCP_IMAP_POOL=1``)."""
+    via ``APPLE_MAIL_MCP_IMAP_POOL=1``).
+    """
     if pool is not None:
         atexit.register(pool.close)
 
@@ -158,8 +161,8 @@ def _attachment_cap_overrides() -> dict[str, int]:
     """Read optional save_attachments byte-cap overrides from the environment
     (#236), mirroring the APPLE_MAIL_MCP_IMAP_POOL opt-in pattern. Returns
     kwargs for AppleMailConnector; invalid/unset values fall back to the
-    connector defaults (100 MB per attachment / 500 MB aggregate)."""
-    import os
+    connector defaults (100 MB per attachment / 500 MB aggregate).
+    """
     overrides: dict[str, int] = {}
     for env_name, kwarg in (
         ("APPLE_MAIL_MCP_MAX_ATTACHMENT_BYTES", "max_attachment_bytes"),
@@ -209,9 +212,7 @@ async def _elicit_confirmation(
           confirmation gate.
     """
     if ctx is None:
-        operation_logger.log_operation(
-            operation, params, "confirmation_required"
-        )
+        operation_logger.log_operation(operation, params, "confirmation_required")
         return {
             "success": False,
             "error": (
@@ -221,27 +222,18 @@ async def _elicit_confirmation(
             "error_type": "confirmation_required",
         }
     try:
-        # mypy 1.20.x collapses every ctx.elicit overload to the
-        # response_type=None variant (the inter-overload docstrings break
-        # its overload grouping), so it reports a bogus arg-type here and
-        # types result.data as dict[str, Any] below — hence the ignore and
-        # the cast. At runtime FastMCP wraps the bool and returns a real
-        # bool in result.data.
+        # FastMCP's published overloads collapse this call to the
+        # response_type=None variant for static analyzers. At runtime it wraps
+        # the requested boolean and returns a real bool in result.data.
         result = await ctx.elicit(
             summary,
             response_type=bool,  # type: ignore[arg-type]
             response_title="Confirm",
-            response_description=(
-                "Set to true to proceed with this operation."
-            ),
+            response_description=("Set to true to proceed with this operation."),
         )
     except Exception as e:
-        logger.warning(
-            "Elicitation unavailable; blocking %s: %s", operation, e
-        )
-        operation_logger.log_operation(
-            operation, params, "confirmation_unavailable"
-        )
+        logger.warning("Elicitation unavailable; blocking %s: %s", operation, e)
+        operation_logger.log_operation(operation, params, "confirmation_unavailable")
         return {
             "success": False,
             "error": (
@@ -253,10 +245,7 @@ async def _elicit_confirmation(
     # Fail closed unless the user explicitly affirmed (accepted *and* set
     # the confirm flag true). Decline, cancel, and accept-with-false all
     # block. (#282)
-    if not (
-        isinstance(result, AcceptedElicitation)
-        and cast(bool, result.data) is True
-    ):
+    if not (isinstance(result, AcceptedElicitation) and cast("bool", result.data) is True):
         operation_logger.log_operation(operation, params, "cancelled")
         return {
             "success": False,
@@ -266,9 +255,7 @@ async def _elicit_confirmation(
     return None
 
 
-@_tool(
-    {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-)
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def list_accounts() -> dict[str, Any]:
     """
     List all configured email accounts in Apple Mail.
@@ -305,7 +292,7 @@ def list_accounts() -> dict[str, Any]:
         }
 
     except Exception as e:
-        logger.error(f"Error listing accounts: {e}")
+        logger.error("Error listing accounts: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -313,9 +300,7 @@ def list_accounts() -> dict[str, Any]:
         }
 
 
-@_tool(
-    {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-)
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def list_rules() -> dict[str, Any]:
     """
     List all Mail.app rules (read-only).
@@ -353,7 +338,7 @@ def list_rules() -> dict[str, Any]:
         }
 
     except Exception as e:
-        logger.error(f"Error listing rules: {e}")
+        logger.error("Error listing rules: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -370,7 +355,7 @@ def _resolve_rule_name(rule_index: int) -> str | None:
     rules = mail.list_rules()
     for r in rules:
         if r.get("index") == rule_index:
-            return cast(str, r.get("name", ""))
+            return cast("str", r.get("name", ""))
     return None
 
 
@@ -381,7 +366,8 @@ def _rule_actions_require_confirmation(actions: dict[str, Any]) -> bool:
     """True when a rule's actions can move, disclose, or delete mail
     (delete / forward_to / move_to / copy_to) — those require user
     confirmation. Purely organizational actions (mark_read, mark_flagged,
-    flag_color) do not. (#222)"""
+    flag_color) do not. (#222)
+    """
     return any(actions.get(name) for name in _DANGEROUS_RULE_ACTIONS)
 
 
@@ -410,9 +396,7 @@ async def delete_rule(
         list_rules before any further rule operations.
     """
     try:
-        rate_err = check_rate_limit(
-            "delete_rule", {"rule_index": rule_index}
-        )
+        rate_err = check_rate_limit("delete_rule", {"rule_index": rule_index})
         if rate_err:
             return rate_err
 
@@ -424,16 +408,11 @@ async def delete_rule(
                 "error_type": "rule_not_found",
             }
 
-        safety_err = check_test_mode_safety(
-            "delete_rule", rule_name=rule_name
-        )
+        safety_err = check_test_mode_safety("delete_rule", rule_name=rule_name)
         if safety_err:
             return safety_err
 
-        summary = (
-            f"Delete Mail.app rule '{rule_name}' (index {rule_index})? "
-            f"This cannot be undone."
-        )
+        summary = f"Delete Mail.app rule '{rule_name}' (index {rule_index})? This cannot be undone."
         cancel_err = await _elicit_confirmation(
             ctx, summary, "delete_rule", {"rule_index": rule_index}
         )
@@ -459,7 +438,7 @@ async def delete_rule(
             "error_type": "rule_not_found",
         }
     except Exception as e:
-        logger.error(f"Error in delete_rule: {e}")
+        logger.error("Error in delete_rule: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -519,9 +498,7 @@ async def create_rule(
         if rate_err:
             return rate_err
 
-        safety_err = check_test_mode_safety(
-            "create_rule", rule_name=name
-        )
+        safety_err = check_test_mode_safety("create_rule", rule_name=name)
         if safety_err:
             return safety_err
 
@@ -537,7 +514,9 @@ async def create_rule(
                 f"automation — confirm before installing."
             )
             cancel_err = await _elicit_confirmation(
-                ctx, summary, "create_rule",
+                ctx,
+                summary,
+                "create_rule",
                 {"name": name, "dangerous_actions": dangerous},
             )
             if cancel_err:
@@ -568,7 +547,7 @@ async def create_rule(
             "error_type": "validation_error",
         }
     except Exception as e:
-        logger.error(f"Error in create_rule: {e}")
+        logger.error("Error in create_rule: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -623,9 +602,7 @@ async def update_rule(
         Dictionary with success status.
     """
     try:
-        rate_err = check_rate_limit(
-            "update_rule", {"rule_index": rule_index}
-        )
+        rate_err = check_rate_limit("update_rule", {"rule_index": rule_index})
         if rate_err:
             return rate_err
 
@@ -637,9 +614,7 @@ async def update_rule(
                 "error_type": "rule_not_found",
             }
 
-        safety_err = check_test_mode_safety(
-            "update_rule", rule_name=rule_name
-        )
+        safety_err = check_test_mode_safety("update_rule", rule_name=rule_name)
         if safety_err:
             return safety_err
 
@@ -701,7 +676,7 @@ async def update_rule(
             "error_type": "validation_error",
         }
     except Exception as e:
-        logger.error(f"Error in update_rule: {e}")
+        logger.error("Error in update_rule: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -709,9 +684,7 @@ async def update_rule(
         }
 
 
-@_tool(
-    {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-)
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def list_mailboxes(account: str) -> dict[str, Any]:
     """
     List all mailboxes for an account.
@@ -737,15 +710,11 @@ def list_mailboxes(account: str) -> dict[str, Any]:
         if rate_err:
             return rate_err
 
-        logger.info(f"Listing mailboxes for account: {account}")
+        logger.info("Listing mailboxes for account: %s", account)
 
         mailboxes = mail.list_mailboxes(account)
 
-        operation_logger.log_operation(
-            "list_mailboxes",
-            {"account": account},
-            "success"
-        )
+        operation_logger.log_operation("list_mailboxes", {"account": account}, "success")
 
         return {
             "success": True,
@@ -754,14 +723,14 @@ def list_mailboxes(account: str) -> dict[str, Any]:
         }
 
     except MailAccountNotFoundError as e:
-        logger.error(f"Account not found: {e}")
+        logger.error("Account not found: %s", e)
         return {
             "success": False,
             "error": f"Account '{account}' not found",
             "error_type": "account_not_found",
         }
     except Exception as e:
-        logger.error(f"Error listing mailboxes: {e}")
+        logger.error("Error listing mailboxes: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -780,7 +749,8 @@ def _annotate_injection(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     field is added only when something is detected (clean responses are
     unchanged). No-op when scanning is disabled
     (APPLE_MAIL_MCP_DISABLE_INJECTION_SCAN=true). Mutates and returns the
-    list."""
+    list.
+    """
     if not _injection_scan_enabled():
         return messages
     for msg in messages:
@@ -846,23 +816,18 @@ def _max_body_bytes() -> int:
     """Resolve the get_messages body cap (#365) at use time, honoring
     APPLE_MAIL_MCP_MAX_BODY_BYTES (mirrors the attachment-cap override
     pattern). Invalid / non-positive values fall back to
-    DEFAULT_MAX_BODY_BYTES."""
-    import os
-
+    DEFAULT_MAX_BODY_BYTES.
+    """
     raw = os.getenv("APPLE_MAIL_MCP_MAX_BODY_BYTES")
     if raw is None:
         return DEFAULT_MAX_BODY_BYTES
     try:
         value = int(raw)
     except ValueError:
-        logger.warning(
-            "Ignoring non-integer APPLE_MAIL_MCP_MAX_BODY_BYTES=%r", raw
-        )
+        logger.warning("Ignoring non-integer APPLE_MAIL_MCP_MAX_BODY_BYTES=%r", raw)
         return DEFAULT_MAX_BODY_BYTES
     if value <= 0:
-        logger.warning(
-            "Ignoring non-positive APPLE_MAIL_MCP_MAX_BODY_BYTES=%r", raw
-        )
+        logger.warning("Ignoring non-positive APPLE_MAIL_MCP_MAX_BODY_BYTES=%r", raw)
         return DEFAULT_MAX_BODY_BYTES
     return value
 
@@ -875,7 +840,8 @@ def _bound_message_bodies(
     whole stdio server — outside the tool's try/except — via an oversized /
     invalid JSON-RPC frame. Adds ``content_truncated`` and
     ``content_original_bytes`` when a body is truncated. Mutates and returns
-    the list."""
+    the list.
+    """
     max_bytes = _max_body_bytes()
     for msg in messages:
         body = msg.get("content")
@@ -918,14 +884,17 @@ def _apply_search_filters(
     populated. ``text_contains`` checks ``content + subject + sender``
     (the practical IMAP ``TEXT`` approximation; recipients omitted).
     """
+
     def matches(m: dict[str, Any]) -> bool:
-        if sender_contains is not None and sender_contains.lower() not in str(
-            m.get("sender", "")
-        ).lower():
+        if (
+            sender_contains is not None
+            and sender_contains.lower() not in str(m.get("sender", "")).lower()
+        ):
             return False
-        if subject_contains is not None and subject_contains.lower() not in str(
-            m.get("subject", "")
-        ).lower():
+        if (
+            subject_contains is not None
+            and subject_contains.lower() not in str(m.get("subject", "")).lower()
+        ):
             return False
         if read_status is not None and bool(m.get("read_status")) != read_status:
             return False
@@ -935,13 +904,12 @@ def _apply_search_filters(
             return False
         if date_to is not None and str(m.get("date_received", "")) > date_to:
             return False
-        if has_attachment is not None and bool(
-            m.get("has_attachment")
-        ) != has_attachment:
+        if has_attachment is not None and bool(m.get("has_attachment")) != has_attachment:
             return False
-        if body_contains is not None and body_contains.lower() not in str(
-            m.get("content", "")
-        ).lower():
+        if (
+            body_contains is not None
+            and body_contains.lower() not in str(m.get("content", "")).lower()
+        ):
             return False
         if text_contains is not None:
             needle = text_contains.lower()
@@ -959,9 +927,7 @@ def _apply_search_filters(
     return [m for m in messages if matches(m)][:limit]
 
 
-@_tool(
-    {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-)
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def search_messages(
     account: str | None = None,
     mailbox: str = "INBOX",
@@ -1133,10 +1099,16 @@ def search_messages(
             return rate_err
 
         logger.info(
-            f"Searching messages in {account}/{mailbox} with filters: "
-            f"sender={sender_contains}, subject={subject_contains}, read={read_status}, "
-            f"flagged={is_flagged}, date_from={date_from}, date_to={date_to}, "
-            f"has_attachment={has_attachment}"
+            "Searching messages in %s/%s with filters: sender=%s, subject=%s, read=%s, flagged=%s, date_from=%s, date_to=%s, has_attachment=%s",
+            account,
+            mailbox,
+            sender_contains,
+            subject_contains,
+            read_status,
+            is_flagged,
+            date_from,
+            date_to,
+            has_attachment,
         )
 
         messages = mail.search_messages(
@@ -1174,7 +1146,7 @@ def search_messages(
                     "text_contains": text_contains,
                 },
             },
-            "success"
+            "success",
         )
 
         response = {
@@ -1189,21 +1161,21 @@ def search_messages(
         return response
 
     except (MailAccountNotFoundError, MailMailboxNotFoundError) as e:
-        logger.error(f"Not found error: {e}")
+        logger.error("Not found error: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "not_found",
         }
     except ValueError as e:
-        logger.error(f"Validation error in search_messages: {e}")
+        logger.error("Validation error in search_messages: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "validation_error",
         }
     except Exception as e:
-        logger.error(f"Error searching messages: {e}")
+        logger.error("Error searching messages: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -1211,9 +1183,7 @@ def search_messages(
         }
 
 
-@_tool(
-    {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-)
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def get_messages(
     message_ids: StrList,
     include_content: bool = True,
@@ -1289,13 +1259,11 @@ def get_messages(
         {"success": True, "messages": [...], "count": 3}
     """
     try:
-        rate_err = check_rate_limit(
-            "get_messages", {"count": len(message_ids)}
-        )
+        rate_err = check_rate_limit("get_messages", {"count": len(message_ids)})
         if rate_err:
             return rate_err
 
-        logger.info(f"Getting messages: {len(message_ids)} ids")
+        logger.info("Getting messages: %d ids", len(message_ids))
 
         messages = _resolve_id_list_to_messages(
             message_ids,
@@ -1307,11 +1275,7 @@ def get_messages(
             body_format=body_format,
         )
 
-        operation_logger.log_operation(
-            "get_messages",
-            {"count": len(message_ids)},
-            "success"
-        )
+        operation_logger.log_operation("get_messages", {"count": len(message_ids)}, "success")
 
         return {
             "success": True,
@@ -1320,7 +1284,7 @@ def get_messages(
         }
 
     except Exception as e:
-        logger.error(f"Error getting messages: {e}")
+        logger.error("Error getting messages: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -1419,9 +1383,7 @@ def update_message(
         # Test-mode safety: when account is provided (moves, or narrow-path),
         # gate against MAIL_TEST_ACCOUNT.
         if account is not None:
-            safety_err = check_test_mode_safety(
-                "update_message", account=account
-            )
+            safety_err = check_test_mode_safety("update_message", account=account)
             if safety_err:
                 return safety_err
 
@@ -1432,7 +1394,7 @@ def update_message(
         # Validate bulk size
         is_valid, error_msg = validate_bulk_operation(len(message_ids), max_items=100)
         if not is_valid:
-            logger.error(f"Validation failed: {error_msg}")
+            logger.error("Validation failed: %s", error_msg)
             return {
                 "success": False,
                 "error": error_msg,
@@ -1440,9 +1402,12 @@ def update_message(
             }
 
         logger.info(
-            f"Updating {len(message_ids)} messages "
-            f"(read={read_status}, flagged={flagged}, color={flag_color}, "
-            f"dest={destination_mailbox})"
+            "Updating %d messages (read=%s, flagged=%s, color=%s, dest=%s)",
+            len(message_ids),
+            read_status,
+            flagged,
+            flag_color,
+            destination_mailbox,
         )
 
         count = mail.update_message(
@@ -1475,14 +1440,14 @@ def update_message(
         }
 
     except MailAccountNotFoundError as e:
-        logger.error(f"Account not found: {e}")
+        logger.error("Account not found: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "account_not_found",
         }
     except MailMailboxNotFoundError as e:
-        logger.error(f"Mailbox not found: {e}")
+        logger.error("Mailbox not found: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -1492,21 +1457,21 @@ def update_message(
         # #364: a Gmail label move that couldn't be verified needs IMAP.
         # Surface it loudly so the caller can run setup-imap, rather than
         # the generic "unknown" that hides an actionable remedy.
-        logger.error(f"Move requires IMAP: {e}")
+        logger.error("Move requires IMAP: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "imap_required",
         }
     except ValueError as e:
-        logger.error(f"Validation error in update_message: {e}")
+        logger.error("Validation error in update_message: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "validation_error",
         }
     except Exception as e:
-        logger.error(f"Error updating messages: {e}")
+        logger.error("Error updating messages: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -1514,9 +1479,7 @@ def update_message(
         }
 
 
-@_tool(
-    {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-)
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def get_thread(message_id: str) -> dict[str, Any]:
     """
     Return all messages in the thread containing the given message.
@@ -1551,13 +1514,11 @@ def get_thread(message_id: str) -> dict[str, Any]:
         if rate_err:
             return rate_err
 
-        logger.info(f"Getting thread for message: {message_id}")
+        logger.info("Getting thread for message: %s", message_id)
 
         thread = mail.get_thread(message_id)
 
-        operation_logger.log_operation(
-            "get_thread", {"message_id": message_id}, "success"
-        )
+        operation_logger.log_operation("get_thread", {"message_id": message_id}, "success")
 
         return {
             "success": True,
@@ -1566,14 +1527,14 @@ def get_thread(message_id: str) -> dict[str, Any]:
         }
 
     except MailMessageNotFoundError as e:
-        logger.error(f"Message not found: {e}")
+        logger.error("Message not found: %s", e)
         return {
             "success": False,
             "error": f"Message '{message_id}' not found",
             "error_type": "message_not_found",
         }
     except Exception as e:
-        logger.error(f"Error getting thread: {e}")
+        logger.error("Error getting thread: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -1581,9 +1542,7 @@ def get_thread(message_id: str) -> dict[str, Any]:
         }
 
 
-@_tool(
-    {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-)
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def get_statistics(
     account: str,
     mailbox: str = "INBOX",
@@ -1632,15 +1591,16 @@ def get_statistics(
         if safety_err:
             return safety_err
 
-        rate_err = check_rate_limit(
-            "get_statistics", {"account": account, "mailbox": mailbox}
-        )
+        rate_err = check_rate_limit("get_statistics", {"account": account, "mailbox": mailbox})
         if rate_err:
             return rate_err
 
         logger.info(
-            f"Computing statistics for {account}/{mailbox} "
-            f"(within_hours={received_within_hours}, scan_limit={scan_limit})"
+            "Computing statistics for %s/%s (within_hours=%s, scan_limit=%s)",
+            account,
+            mailbox,
+            received_within_hours,
+            scan_limit,
         )
 
         rows = mail.search_messages(
@@ -1682,7 +1642,7 @@ def get_statistics(
         return {"success": True, "statistics": statistics}
 
     except Exception as e:
-        logger.error(f"Error computing statistics: {e}")
+        logger.error("Error computing statistics: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -1732,8 +1692,6 @@ def save_attachments(
          "rejected": [{"name": "huge.bin", "size": 2147483648,
                        "reason": "per_attachment_cap"}]}
     """
-    from pathlib import Path
-
     try:
         rate_err = check_rate_limit("save_attachments", {"message_id": message_id})
         if rate_err:
@@ -1756,9 +1714,7 @@ def save_attachments(
                 "error_type": "invalid_directory",
             }
 
-        logger.info(
-            f"Saving attachments from message {message_id} to {save_directory}"
-        )
+        logger.info("Saving attachments from message %s to %s", message_id, save_directory)
 
         result = mail.save_attachments(
             message_id=message_id,
@@ -1775,7 +1731,7 @@ def save_attachments(
                 "directory": save_directory,
                 "indices": attachment_indices,
             },
-            "success"
+            "success",
         )
 
         return {
@@ -1787,21 +1743,21 @@ def save_attachments(
         }
 
     except (FileNotFoundError, ValueError) as e:
-        logger.error(f"Validation error: {e}")
+        logger.error("Validation error: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "validation_error",
         }
     except MailMessageNotFoundError as e:
-        logger.error(f"Message not found: {e}")
+        logger.error("Message not found: %s", e)
         return {
             "success": False,
             "error": f"Message '{message_id}' not found",
             "error_type": "message_not_found",
         }
     except Exception as e:
-        logger.error(f"Error saving attachments: {e}")
+        logger.error("Error saving attachments: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -1809,9 +1765,7 @@ def save_attachments(
         }
 
 
-@_tool(
-    {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-)
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def get_attachment_content(
     message_id: str,
     attachment_index: int,
@@ -1849,9 +1803,7 @@ def get_attachment_content(
     large files. Override via ``APPLE_MAIL_MCP_MAX_INLINE_ATTACHMENT_BYTES``.
     """
     try:
-        rate_err = check_rate_limit(
-            "get_attachment_content", {"message_id": message_id}
-        )
+        rate_err = check_rate_limit("get_attachment_content", {"message_id": message_id})
         if rate_err:
             return rate_err
 
@@ -1861,9 +1813,7 @@ def get_attachment_content(
             account=account,
             mailbox=mailbox,
         )
-        content, encoding = attachment_content_encoding(
-            result["payload"], result["mime_type"]
-        )
+        content, encoding = attachment_content_encoding(result["payload"], result["mime_type"])
 
         operation_logger.log_operation(
             "get_attachment_content",
@@ -1898,7 +1848,7 @@ def get_attachment_content(
             "error_type": "message_not_found",
         }
     except Exception as e:
-        logger.error(f"Error getting attachment content: {e}")
+        logger.error("Error getting attachment content: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -1951,7 +1901,7 @@ def create_mailbox(
         if rate_err:
             return rate_err
 
-        logger.info(f"Creating mailbox '{name}' in account {account}")
+        logger.info("Creating mailbox '%s' in account %s", name, account)
 
         # Create the mailbox
         success = mail.create_mailbox(
@@ -1968,28 +1918,28 @@ def create_mailbox(
         }
 
     except ValueError as e:
-        logger.error(f"Validation error: {e}")
+        logger.error("Validation error: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "validation_error",
         }
     except MailAccountNotFoundError as e:
-        logger.error(f"Account not found: {e}")
+        logger.error("Account not found: %s", e)
         return {
             "success": False,
             "error": f"Account '{account}' not found",
             "error_type": "account_not_found",
         }
     except MailAppleScriptError as e:
-        logger.error(f"AppleScript error: {e}")
+        logger.error("AppleScript error: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "applescript_error",
         }
     except Exception as e:
-        logger.error(f"Error creating mailbox: {e}")
+        logger.error("Error creating mailbox: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -2068,25 +2018,28 @@ def update_mailbox(
 
         rate_err = check_rate_limit(
             "update_mailbox",
-            {"account": account, "name": name, "new_name": new_name,
-             "new_parent": new_parent},
+            {"account": account, "name": name, "new_name": new_name, "new_parent": new_parent},
         )
         if rate_err:
             return rate_err
 
         logger.info(
-            f"Updating mailbox {name!r} in {account}: "
-            f"new_name={new_name!r}, new_parent={new_parent!r}"
+            "Updating mailbox %r in %s: new_name=%r, new_parent=%r",
+            name,
+            account,
+            new_name,
+            new_parent,
         )
 
         success = mail.update_mailbox(
-            account=account, name=name,
-            new_name=new_name, new_parent=new_parent,
+            account=account,
+            name=name,
+            new_name=new_name,
+            new_parent=new_parent,
         )
         operation_logger.log_operation(
             "update_mailbox",
-            {"account": account, "name": name,
-             "new_name": new_name, "new_parent": new_parent},
+            {"account": account, "name": name, "new_name": new_name, "new_parent": new_parent},
             "success" if success else "failure",
         )
 
@@ -2123,7 +2076,7 @@ def update_mailbox(
             "error_type": "account_not_found",
         }
     except MailAppleScriptError as e:
-        logger.error(f"AppleScript error in update_mailbox: {e}")
+        logger.error("AppleScript error in update_mailbox: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -2136,7 +2089,7 @@ def update_mailbox(
             "error_type": "unsupported_gmail_system_label",
         }
     except Exception as e:
-        logger.exception(f"Unexpected error in update_mailbox: {e}")
+        logger.exception("Unexpected error in update_mailbox: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -2194,8 +2147,7 @@ async def delete_mailbox(
 
         rate_err = check_rate_limit(
             "delete_mailbox",
-            {"account": account, "name": name,
-             "delete_messages": delete_messages},
+            {"account": account, "name": name, "delete_messages": delete_messages},
         )
         if rate_err:
             return rate_err
@@ -2208,21 +2160,23 @@ async def delete_mailbox(
             f"This is destructive. The mailbox will be removed from the IMAP server."
         )
         cancel_err = await _elicit_confirmation(
-            ctx, summary, "delete_mailbox",
-            {"account": account, "name": name,
-             "delete_messages": delete_messages},
+            ctx,
+            summary,
+            "delete_mailbox",
+            {"account": account, "name": name, "delete_messages": delete_messages},
         )
         if cancel_err:
             return cancel_err
 
-        count = mail.delete_mailbox(
-            account=account, name=name, delete_messages=delete_messages
-        )
+        count = mail.delete_mailbox(account=account, name=name, delete_messages=delete_messages)
         operation_logger.log_operation(
             "delete_mailbox",
-            {"account": account, "name": name,
-             "delete_messages": delete_messages,
-             "deleted_message_count": count},
+            {
+                "account": account,
+                "name": name,
+                "delete_messages": delete_messages,
+                "deleted_message_count": count,
+            },
             "success",
         )
         return {
@@ -2269,7 +2223,7 @@ async def delete_mailbox(
             "error_type": "unsupported_gmail_system_label",
         }
     except Exception as e:
-        logger.exception(f"Unexpected error in delete_mailbox: {e}")
+        logger.exception("Unexpected error in delete_mailbox: %s", e)
         return {
             "success": False,
             "error": str(e),
@@ -2333,9 +2287,7 @@ async def delete_messages(
         # against MAIL_TEST_ACCOUNT so an integration run can't delete
         # from a real account (delete_messages is account-gated).
         if account is not None:
-            safety_err = check_test_mode_safety(
-                "delete_messages", account=account
-            )
+            safety_err = check_test_mode_safety("delete_messages", account=account)
             if safety_err:
                 return safety_err
 
@@ -2356,23 +2308,27 @@ async def delete_messages(
         # account/source_mailbox are either both set or both None (the
         # connector rejects a partial pair), so the two-way split is total.
         location = (
-            f"{account}/{source_mailbox}"
-            if account and source_mailbox
-            else "across all mailboxes"
+            f"{account}/{source_mailbox}" if account and source_mailbox else "across all mailboxes"
         )
         summary = (
             f"Move {len(message_ids)} message(s) to Trash from {location}?\n\n"
             f"Recoverable from the account's Trash until that mailbox is emptied."
         )
         cancel_err = await _elicit_confirmation(
-            ctx, summary, "delete_messages",
-            {"count": len(message_ids), "account": account,
-             "source_mailbox": source_mailbox, "permanent": permanent},
+            ctx,
+            summary,
+            "delete_messages",
+            {
+                "count": len(message_ids),
+                "account": account,
+                "source_mailbox": source_mailbox,
+                "permanent": permanent,
+            },
         )
         if cancel_err:
             return cancel_err
 
-        logger.info(f"Deleting {len(message_ids)} message(s) to trash")
+        logger.info("Deleting %d message(s) to trash", len(message_ids))
 
         # Delete the messages
         count = mail.delete_messages(
@@ -2385,8 +2341,12 @@ async def delete_messages(
 
         operation_logger.log_operation(
             "delete_messages",
-            {"count": count, "account": account,
-             "source_mailbox": source_mailbox, "permanent": permanent},
+            {
+                "count": count,
+                "account": account,
+                "source_mailbox": source_mailbox,
+                "permanent": permanent,
+            },
             "success",
         )
 
@@ -2397,36 +2357,40 @@ async def delete_messages(
         }
 
     except ValueError as e:
-        logger.error(f"Validation error: {e}")
+        logger.error("Validation error: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "validation_error",
         }
     except MailMessageNotFoundError as e:
-        logger.error(f"Message not found: {e}")
+        logger.error("Message not found: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "message_not_found",
         }
     except Exception as e:
-        logger.error(f"Error deleting messages: {e}")
+        logger.error("Error deleting messages: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "unknown",
         }
+
+
 def _get_template_store() -> TemplateStore:
     """Return the active TemplateStore. Re-resolved per call so the
     APPLE_MAIL_MCP_HOME env var (and test-time monkeypatching) take
-    effect at use time, not import time."""
+    effect at use time, not import time.
+    """
     return TemplateStore()
 
 
 def _template_error_response(e: MailTemplateError) -> dict[str, Any]:
     """Map a template exception to the standard {success, error, error_type}
-    response shape."""
+    response shape.
+    """
     if isinstance(e, MailTemplateNotFoundError):
         et = "template_not_found"
     elif isinstance(e, MailTemplateInvalidNameError):
@@ -2440,9 +2404,7 @@ def _template_error_response(e: MailTemplateError) -> dict[str, Any]:
     return {"success": False, "error": str(e), "error_type": et}
 
 
-@_tool(
-    {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-)
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def list_templates() -> dict[str, Any]:
     """List all stored email templates.
 
@@ -2462,19 +2424,15 @@ def list_templates() -> dict[str, Any]:
         operation_logger.log_operation("list_templates", {}, "success")
         return {
             "success": True,
-            "templates": [
-                {"name": t.name, "subject": t.subject} for t in templates
-            ],
+            "templates": [{"name": t.name, "subject": t.subject} for t in templates],
             "count": len(templates),
         }
     except Exception as e:
-        logger.error(f"Error in list_templates: {e}")
+        logger.error("Error in list_templates: %s", e)
         return {"success": False, "error": str(e), "error_type": "unknown"}
 
 
-@_tool(
-    {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-)
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def get_template(name: str) -> dict[str, Any]:
     """Read a single template by name.
 
@@ -2501,7 +2459,7 @@ def get_template(name: str) -> dict[str, Any]:
     except MailTemplateError as e:
         return _template_error_response(e)
     except Exception as e:
-        logger.error(f"Error in get_template: {e}")
+        logger.error("Error in get_template: %s", e)
         return {"success": False, "error": str(e), "error_type": "unknown"}
 
 
@@ -2509,9 +2467,7 @@ def get_template(name: str) -> dict[str, Any]:
     {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True},
     mutating=True,
 )
-def save_template(
-    name: str, body: str, subject: str | None = None
-) -> dict[str, Any]:
+def save_template(name: str, body: str, subject: str | None = None) -> dict[str, Any]:
     """Create or overwrite a template.
 
     Args:
@@ -2538,9 +2494,7 @@ def save_template(
             }
         # Normalize body to end with a newline so on-disk files stay tidy.
         normalized_body = body if body.endswith("\n") else body + "\n"
-        template = Template(
-            name=name, subject=subject, body=normalized_body
-        )
+        template = Template(name=name, subject=subject, body=normalized_body)
         created = _get_template_store().save(template)
         operation_logger.log_operation(
             "save_template", {"name": name, "created": created}, "success"
@@ -2549,7 +2503,7 @@ def save_template(
     except MailTemplateError as e:
         return _template_error_response(e)
     except Exception as e:
-        logger.error(f"Error in save_template: {e}")
+        logger.error("Error in save_template: %s", e)
         return {"success": False, "error": str(e), "error_type": "unknown"}
 
 
@@ -2557,9 +2511,7 @@ def save_template(
     {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True},
     mutating=True,
 )
-async def delete_template(
-    name: str, ctx: Context | None = None
-) -> dict[str, Any]:
+async def delete_template(name: str, ctx: Context | None = None) -> dict[str, Any]:
     """Delete a template by name.
 
     Destructive — requires user confirmation via MCP elicitation before
@@ -2583,27 +2535,21 @@ async def delete_template(
             f"Delete email template '{name}'? "
             f"This removes the file at ~/.apple_mail_mcp/templates/{name}.md."
         )
-        cancel_err = await _elicit_confirmation(
-            ctx, summary, "delete_template", {"name": name}
-        )
+        cancel_err = await _elicit_confirmation(ctx, summary, "delete_template", {"name": name})
         if cancel_err:
             return cancel_err
 
         _get_template_store().delete(name)
-        operation_logger.log_operation(
-            "delete_template", {"name": name}, "success"
-        )
+        operation_logger.log_operation("delete_template", {"name": name}, "success")
         return {"success": True, "name": name}
     except MailTemplateError as e:
         return _template_error_response(e)
     except Exception as e:
-        logger.error(f"Error in delete_template: {e}")
+        logger.error("Error in delete_template: %s", e)
         return {"success": False, "error": str(e), "error_type": "unknown"}
 
 
-@_tool(
-    {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
-)
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def render_template(
     name: str,
     message_id: str | None = None,
@@ -2658,14 +2604,15 @@ def render_template(
             "error_type": "message_not_found",
         }
     except Exception as e:
-        logger.error(f"Error in render_template: {e}")
+        logger.error("Error in render_template: %s", e)
         return {"success": False, "error": str(e), "error_type": "unknown"}
 
 
 def _get_draft_state_store() -> DraftStateStore:
     """Return the active DraftStateStore. Re-resolved per call so the
     APPLE_MAIL_MCP_HOME env var (and test-time monkeypatching) take
-    effect at use time, not import time. Mirrors _get_template_store."""
+    effect at use time, not import time. Mirrors _get_template_store.
+    """
     return DraftStateStore()
 
 
@@ -2688,7 +2635,8 @@ def _draft_action_error(op: str, e: Exception) -> dict[str, Any] | None:
     Returns None if the exception isn't one we model here (caller should
     fall through to a generic ``unknown`` mapping). Centralizing this
     keeps the per-tool exception handling small enough to stay under
-    the cyclomatic-complexity threshold."""
+    the cyclomatic-complexity threshold.
+    """
     if isinstance(e, MailMessageNotFoundError):
         return {"success": False, "error": str(e), "error_type": "message_not_found"}
     if isinstance(e, MailAccountNotFoundError):
@@ -2703,7 +2651,7 @@ def _draft_action_error(op: str, e: Exception) -> dict[str, Any] | None:
     if isinstance(e, MailDraftError):
         return _draft_error_response(e)
     if isinstance(e, MailAppleScriptError):
-        logger.error(f"AppleScript error in {op}: {e}")
+        logger.error("AppleScript error in %s: %s", op, e)
         return {"success": False, "error": str(e), "error_type": "applescript_error"}
     return None
 
@@ -2744,7 +2692,7 @@ def _resolve_draft_attachments(
     draft_id: str,
     attachment_paths: list[str] | None,
     existing_names: list[str],
-) -> tuple[list[Path] | None, "tempfile.TemporaryDirectory[str] | None"]:
+) -> tuple[list[Path] | None, tempfile.TemporaryDirectory[str] | None]:
     """Compute final attachment paths for an update_draft call.
 
     Semantics:
@@ -2766,9 +2714,7 @@ def _resolve_draft_attachments(
         return None, None
 
     tempdir = tempfile.TemporaryDirectory(prefix="amm-update-attach-")
-    extracted = mail.extract_draft_attachments(
-        draft_id, existing_names, Path(tempdir.name)
-    )
+    extracted = mail.extract_draft_attachments(draft_id, existing_names, Path(tempdir.name))
     return extracted, tempdir
 
 
@@ -2844,10 +2790,7 @@ def _validate_create_draft_seed_inputs(
     if body_html is not None and (reply_to or forward_of):
         return {
             "success": False,
-            "error": (
-                "body_html is only supported for fresh drafts, not "
-                "reply_to/forward_of"
-            ),
+            "error": ("body_html is only supported for fresh drafts, not reply_to/forward_of"),
             "error_type": "validation_error",
         }
     return None
@@ -2957,7 +2900,10 @@ async def _run_send_now_gates(
                 "error_type": "validation_error",
             }
     cancel_err = await _elicit_confirmation(
-        ctx, summary, operation, elicit_extra,
+        ctx,
+        summary,
+        operation,
+        elicit_extra,
     )
     if cancel_err:
         return cancel_err
@@ -2977,12 +2923,12 @@ def _persist_draft_seed(
     after delete-and-recreate). No-op for `send_now=True`, failed creates
     (empty draft_id), or seed kinds without an anchor message. (#191/#192)
     """
-    if send_now or not draft_id or seed_kind not in ("reply", "forward") or not seed_id:
+    if send_now or not draft_id or seed_kind not in {"reply", "forward"} or not seed_id:
         return
     _get_draft_state_store().set_seed(
         draft_id,
         SeedRecord(
-            seed_kind=cast(Any, seed_kind),
+            seed_kind=cast("Any", seed_kind),
             seed_id=seed_id,
             reply_all=reply_all,
         ),
@@ -3017,12 +2963,8 @@ def _resolve_update_subject_body(
             merged_subject = rendered["subject"]
         if merged_body is None:
             merged_body = rendered["body"] or ""
-    final_subject = (
-        merged_subject if merged_subject is not None else state.get("subject")
-    )
-    final_body = (
-        merged_body if merged_body is not None else state.get("body", "")
-    )
+    final_subject = merged_subject if merged_subject is not None else state.get("subject")
+    final_body = merged_body if merged_body is not None else state.get("body", "")
     return final_subject, final_body
 
 
@@ -3140,9 +3082,7 @@ async def create_draft(
         )
         if common_err:
             return common_err
-        seed_err = _validate_create_draft_seed_inputs(
-            reply_to, forward_of, body_html
-        )
+        seed_err = _validate_create_draft_seed_inputs(reply_to, forward_of, body_html)
         if seed_err:
             return seed_err
 
@@ -3153,7 +3093,11 @@ async def create_draft(
         # ----------------------------------------------------------------
         try:
             subject, body = _maybe_apply_template(
-                template_name, template_vars, seed_id, subject, body,
+                template_name,
+                template_vars,
+                seed_id,
+                subject,
+                body,
             )
         except MailTemplateError as e:
             return _template_error_response(e)
@@ -3171,7 +3115,12 @@ async def create_draft(
         if send_now:
             all_recipients = (to or []) + (cc or []) + (bcc or [])
             summary = _build_draft_send_summary(
-                seed_kind, to, cc, bcc, subject, body,
+                seed_kind,
+                to,
+                cc,
+                bcc,
+                subject,
+                body,
             )
             gate_err = await _run_send_now_gates(
                 operation="create_draft",
@@ -3180,13 +3129,13 @@ async def create_draft(
                 rate_params={"subject": subject, "to": to},
                 summary=summary,
                 elicit_extra={
-                    "subject": subject, "to": to, "seed_kind": seed_kind,
+                    "subject": subject,
+                    "to": to,
+                    "seed_kind": seed_kind,
                 },
                 # Only validate recipient shape when caller supplied any —
                 # for reply with no overrides, recipients come from Mail.
-                validate_recipient_shape=(
-                    to is not None or cc is not None or bcc is not None
-                ),
+                validate_recipient_shape=(to is not None or cc is not None or bcc is not None),
                 validate_args=(to or [], cc, bcc),
             )
             if gate_err:
@@ -3196,9 +3145,7 @@ async def create_draft(
         # Connector call
         # ----------------------------------------------------------------
         attachment_path_objs = (
-            [Path(p) for p in attachment_paths]
-            if attachment_paths is not None
-            else None
+            [Path(p) for p in attachment_paths] if attachment_paths is not None else None
         )
         warnings: list[str] = []
         result = mail.create_draft(
@@ -3220,7 +3167,11 @@ async def create_draft(
         draft_id = result.get("draft_id", "")
 
         _persist_draft_seed(
-            draft_id, seed_kind, seed_id, reply_all, send_now,
+            draft_id,
+            seed_kind,
+            seed_id,
+            reply_all,
+            send_now,
         )
 
         operation_logger.log_operation(
@@ -3251,7 +3202,7 @@ async def create_draft(
         handled = _draft_action_error("create_draft", e)
         if handled is not None:
             return handled
-        logger.exception(f"Unexpected error in create_draft: {e}")
+        logger.exception("Unexpected error in create_draft: %s", e)
         return {"success": False, "error": str(e), "error_type": "unknown"}
 
 
@@ -3332,28 +3283,31 @@ async def update_draft(
             return _draft_error_response(e)
 
         store = _get_draft_state_store()
-        seed_kind, seed_id, reply_all = _resolve_draft_seed(
-            draft_id, state, store
-        )
+        seed_kind, seed_id, reply_all = _resolve_draft_seed(draft_id, state, store)
         if body_html is not None and seed_kind != "new":
             return {
                 "success": False,
-                "error": (
-                    "body_html is only supported for fresh drafts, not "
-                    "reply/forward drafts"
-                ),
+                "error": ("body_html is only supported for fresh drafts, not reply/forward drafts"),
                 "error_type": "validation_error",
             }
 
         try:
             final_subject, final_body = _resolve_update_subject_body(
-                subject, body, template_name, template_vars, seed_id, state,
+                subject,
+                body,
+                template_name,
+                template_vars,
+                seed_id,
+                state,
             )
         except MailTemplateError as e:
             return _template_error_response(e)
 
         final_to, final_cc, final_bcc = _merge_draft_recipients(
-            to, cc, bcc, state,
+            to,
+            cc,
+            bcc,
+            state,
         )
 
         # tempdir (if any) is cleaned up in the finally block.
@@ -3362,11 +3316,13 @@ async def update_draft(
         )
 
         if send_now:
-            all_recipients = (
-                (final_to or []) + (final_cc or []) + (final_bcc or [])
-            )
+            all_recipients = (final_to or []) + (final_cc or []) + (final_bcc or [])
             summary = _build_draft_send_summary(
-                seed_kind, final_to, final_cc, final_bcc, final_subject,
+                seed_kind,
+                final_to,
+                final_cc,
+                final_bcc,
+                final_subject,
                 final_body or "",
             )
             # validate_recipient_shape stays False — recipients came from
@@ -3387,9 +3343,7 @@ async def update_draft(
         try:
             mail.delete_draft(draft_id)
         except MailDraftNotFoundError:
-            return _draft_error_response(
-                MailDraftNotFoundError(f"no draft with id {draft_id!r}")
-            )
+            return _draft_error_response(MailDraftNotFoundError(f"no draft with id {draft_id!r}"))
         store.delete(draft_id)
 
         result = mail.create_draft(
@@ -3409,7 +3363,11 @@ async def update_draft(
         new_draft_id = result.get("draft_id", "")
 
         _persist_draft_seed(
-            new_draft_id, seed_kind, seed_id, reply_all, send_now,
+            new_draft_id,
+            seed_kind,
+            seed_id,
+            reply_all,
+            send_now,
         )
 
         operation_logger.log_operation(
@@ -3432,14 +3390,12 @@ async def update_draft(
         handled = _draft_action_error("update_draft", e)
         if handled is not None:
             return handled
-        logger.exception(f"Unexpected error in update_draft: {e}")
+        logger.exception("Unexpected error in update_draft: %s", e)
         return {"success": False, "error": str(e), "error_type": "unknown"}
     finally:
         if tempdir is not None:
-            try:
+            with contextlib.suppress(Exception):
                 tempdir.cleanup()
-            except Exception:
-                pass
 
 
 @_tool(
@@ -3465,34 +3421,30 @@ def delete_draft(draft_id: str) -> dict[str, Any]:
     try:
         mail.delete_draft(draft_id)
         _get_draft_state_store().delete(draft_id)
-        operation_logger.log_operation(
-            "delete_draft", {"draft_id": draft_id}, "success"
-        )
+        operation_logger.log_operation("delete_draft", {"draft_id": draft_id}, "success")
         return {"success": True, "draft_id": draft_id}
     except MailDraftError as e:
         return _draft_error_response(e)
     except MailAppleScriptError as e:
-        logger.error(f"AppleScript error in delete_draft: {e}")
+        logger.error("AppleScript error in delete_draft: %s", e)
         return {
             "success": False,
             "error": str(e),
             "error_type": "applescript_error",
         }
     except Exception as e:
-        logger.exception(f"Unexpected error in delete_draft: {e}")
+        logger.exception("Unexpected error in delete_draft: %s", e)
         return {"success": False, "error": str(e), "error_type": "unknown"}
 
 
 def _port_arg(value: str) -> int:
-    """argparse type for ``--port``: an integer in the valid TCP range."""
+    """Argparse type for ``--port``: an integer in the valid TCP range."""
     try:
         port = int(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"invalid port {value!r}") from exc
     if not 1 <= port <= 65535:
-        raise argparse.ArgumentTypeError(
-            f"port must be between 1 and 65535, got {port}"
-        )
+        raise argparse.ArgumentTypeError(f"port must be between 1 and 65535, got {port}")
     return port
 
 
@@ -3543,9 +3495,7 @@ class HTTPGuard:
         await send({"type": "http.response.body", "body": body})
 
 
-def _load_http_bearer_token(
-    *, token_file: str | None, token_env: str
-) -> str:
+def _load_http_bearer_token(*, token_file: str | None, token_env: str) -> str:
     """Load and validate the required Streamable HTTP bearer token."""
     if token_file:
         try:
@@ -3556,8 +3506,7 @@ def _load_http_bearer_token(
         token = os.environ.get(token_env, "").strip()
         if not token:
             raise RuntimeError(
-                "HTTP transport requires --bearer-token-file or a non-empty "
-                f"{token_env}"
+                f"HTTP transport requires --bearer-token-file or a non-empty {token_env}"
             )
     if len(token) < 32:
         raise RuntimeError("HTTP bearer token must contain at least 32 characters")
@@ -3631,8 +3580,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     setup_imap = sub.add_parser(
         "setup-imap",
         help=(
-            "Configure the Keychain entry that enables the IMAP fast path "
-            "for a Mail.app account."
+            "Configure the Keychain entry that enables the IMAP fast path for a Mail.app account."
         ),
     )
     setup_imap.add_argument(
@@ -3690,8 +3638,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "setup-imap":
-        from .cli import run_setup_imap
-
         return run_setup_imap(
             account_name=args.account,
             cli_email=args.email,

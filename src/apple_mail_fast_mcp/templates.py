@@ -84,9 +84,7 @@ class Template:
         placeholders raise MailTemplateMissingVariableError naming
         every unresolved placeholder (sorted).
         """
-        rendered_subject = (
-            _substitute(self.subject, vars) if self.subject is not None else None
-        )
+        rendered_subject = _substitute(self.subject, vars) if self.subject is not None else None
         rendered_body = _substitute(self.body, vars)
         return {"subject": rendered_subject, "body": rendered_body}
 
@@ -101,9 +99,7 @@ def _substitute(text: str, vars: dict[str, Any]) -> str:
         missing = sorted(k for k in needed if k not in vars)
         if not missing:
             # Shouldn't happen, but fall back to the underlying KeyError.
-            raise MailTemplateMissingVariableError(
-                f"missing placeholder: {e.args[0]!r}"
-            ) from e
+            raise MailTemplateMissingVariableError(f"missing placeholder: {e.args[0]!r}") from e
         raise MailTemplateMissingVariableError(
             f"missing placeholder(s): {', '.join(missing)}"
         ) from e
@@ -117,16 +113,14 @@ def parse_template_file(text: str, *, name: str) -> Template:
     the body. A file with no blank line is rejected as malformed.
     """
     if not text:
-        raise MailTemplateInvalidFormatError(
-            f"template {name!r} is empty"
-        )
+        raise MailTemplateInvalidFormatError(f"template {name!r} is empty")
 
     # Split into header_block and body on the first blank line.
     # A leading blank line means "no headers, body follows".
     lines = text.splitlines(keepends=True)
     blank_idx: int | None = None
     for i, line in enumerate(lines):
-        if line.strip() == "":
+        if not line.strip():
             blank_idx = i
             break
 
@@ -139,9 +133,7 @@ def parse_template_file(text: str, *, name: str) -> Template:
     body_lines = lines[blank_idx + 1 :]
     body = "".join(body_lines)
     if not body.strip():
-        raise MailTemplateInvalidFormatError(
-            f"template {name!r} body is empty"
-        )
+        raise MailTemplateInvalidFormatError(f"template {name!r} body is empty")
 
     headers: dict[str, str] = {}
     for raw in header_lines:
@@ -156,9 +148,7 @@ def parse_template_file(text: str, *, name: str) -> Template:
         key = key.strip().lower()
         value = value.strip()
         if key not in _KNOWN_HEADER_KEYS:
-            raise MailTemplateInvalidFormatError(
-                f"template {name!r}: unknown header key {key!r}"
-            )
+            raise MailTemplateInvalidFormatError(f"template {name!r}: unknown header key {key!r}")
         headers[key] = value
 
     return Template(
@@ -170,7 +160,8 @@ def parse_template_file(text: str, *, name: str) -> Template:
 
 def serialize_template(t: Template) -> str:
     """Inverse of parse_template_file. Output ends with the body's
-    trailing newline (or a single newline if the body had none)."""
+    trailing newline (or a single newline if the body had none).
+    """
     header_block = ""
     if t.subject is not None:
         header_block = f"subject: {t.subject}\n"
@@ -179,9 +170,7 @@ def serialize_template(t: Template) -> str:
 
 def _validate_name(name: str) -> None:
     if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
-        raise MailTemplateInvalidNameError(
-            f"template name {name!r} must match {_NAME_RE.pattern}"
-        )
+        raise MailTemplateInvalidNameError(f"template name {name!r} must match {_NAME_RE.pattern}")
 
 
 def default_root() -> Path:
@@ -191,9 +180,13 @@ def default_root() -> Path:
     return base / "templates"
 
 
+type TemplateList = list[Template]
+
+
 class TemplateStore:
     """File-backed template store. One file per template at
-    ``<root>/<name>.md``."""
+    ``<root>/<name>.md``.
+    """
 
     def __init__(self, root: Path | None = None) -> None:
         self.root = Path(root) if root is not None else default_root()
@@ -202,10 +195,11 @@ class TemplateStore:
         _validate_name(name)
         return self.root / f"{name}{_EXT}"
 
-    def list(self) -> list[Template]:
+    def list(self) -> TemplateList:
         """All templates, sorted by name. Missing directory returns
         empty list. Files that fail to parse are skipped silently
-        here — call get() to surface format errors per-template."""
+        here — call get() to surface format errors per-template.
+        """
         if not self.root.is_dir():
             return []
         out: list[Template] = []
@@ -224,15 +218,14 @@ class TemplateStore:
     def get(self, name: str) -> Template:
         path = self._path_for(name)
         if not path.is_file():
-            raise MailTemplateNotFoundError(
-                f"no template named {name!r}"
-            )
+            raise MailTemplateNotFoundError(f"no template named {name!r}")
         text = path.read_text(encoding="utf-8")
         return parse_template_file(text, name=name)
 
     def save(self, template: Template) -> bool:
         """Write template to disk. Returns True if newly created,
-        False if it overwrote an existing template."""
+        False if it overwrote an existing template.
+        """
         path = self._path_for(template.name)
         existed = path.is_file()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -242,7 +235,5 @@ class TemplateStore:
     def delete(self, name: str) -> None:
         path = self._path_for(name)
         if not path.is_file():
-            raise MailTemplateNotFoundError(
-                f"no template named {name!r}"
-            )
+            raise MailTemplateNotFoundError(f"no template named {name!r}")
         path.unlink()
