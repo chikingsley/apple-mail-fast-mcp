@@ -19,7 +19,7 @@ The real stdio handshake belongs here because it pins transport regression #50 w
 `tests/live` talks to real AppleScript, Mail.app, IMAP, SMTP, or MCP boundaries. It is disabled unless `--run-live` is present, and account-changing tests also require `MAIL_TEST_ACCOUNT`:
 
 ```bash
-MAIL_TEST_ACCOUNT=Peacockery just live
+MAIL_TEST_ACCOUNT=simon@peacockery.studio just live
 ```
 
 Live tests may create and remove drafts, rules, messages, and fixture mailboxes. Use an account where those mutations are acceptable. `MAIL_TEST_MODE=true` restricts account-gated operations to `MAIL_TEST_ACCOUNT` and prevents ordinary sends.
@@ -29,7 +29,7 @@ Live tests may create and remove drafts, rules, messages, and fixture mailboxes.
 The outbound test has a second command-line gate and requires an explicit recipient routed back to the selected inbox:
 
 ```bash
-MAIL_TEST_ACCOUNT=Peacockery \
+MAIL_TEST_ACCOUNT=simon@peacockery.studio \
 MAIL_LIVE_RECIPIENT=ci@peacockery.studio \
 just live-send
 ```

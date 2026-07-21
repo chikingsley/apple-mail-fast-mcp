@@ -8,7 +8,7 @@ These tests require:
    - MAIL_TEST_MODE=true
    - MAIL_TEST_ACCOUNT=<test account name>
 
-Run with: MAIL_TEST_MODE=true MAIL_TEST_ACCOUNT=Peacockery pytest --run-live
+Run with: MAIL_TEST_MODE=true MAIL_TEST_ACCOUNT=simon@peacockery.studio pytest --run-live
 """
 
 import contextlib

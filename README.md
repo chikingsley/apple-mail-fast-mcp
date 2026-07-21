@@ -83,13 +83,13 @@ The repository intentionally has only two test categories:
 Run live tests only against an explicit expendable account:
 
 ```bash
-MAIL_TEST_ACCOUNT=Peacockery just live
+MAIL_TEST_ACCOUNT=simon@peacockery.studio just live
 ```
 
 The real outbound delivery check is separately gated because it sends an actual message and waits for it to reach the selected inbox:
 
 ```bash
-MAIL_TEST_ACCOUNT=Peacockery \
+MAIL_TEST_ACCOUNT=simon@peacockery.studio \
 MAIL_LIVE_RECIPIENT=ci@peacockery.studio \
 just live-send
 ```
