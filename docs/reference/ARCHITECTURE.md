@@ -14,16 +14,14 @@ server.py (FastMCP)
         |
         v
 mail_connector.py (AppleMailConnector) — dispatch + domain logic
-        |                                   \
-        | AppleScript path (baseline)        | IMAP fast path (when hinted + creds)
-        v                                     v
-  configured AF_UNIX socket or osascript  imap_connector.py (ImapConnector / pool)
-        |                                     |
-        v                                     v
-  resident signed helper or osascript     the account's IMAP server
-        |
-        v
-  Apple Mail.app (macOS Automation)
+        |                    |                              \
+        | AppleScript        | local metadata               | IMAP fast path
+        | baseline           | accelerator                  | when creds exist
+        v                    v                              v
+  helper or osascript   local_db_connector.py          imap_connector.py
+        |                    |                              |
+        v                    v                              v
+  Apple Mail.app       Mail Envelope Index             account IMAP server
 ```
 
 ## Dispatch model (the central v0.8.0 abstraction)
@@ -36,6 +34,8 @@ mail_connector.py (AppleMailConnector) — dispatch + domain logic
 When both hold, the connector issues server-side IMAP (e.g. `SEARCH`, `UID MOVE`, `STORE`) instead of driving Mail.app's per-message AppleScript loop. **On any IMAP failure** — no credentials, bad password, offline, capability gap — it falls back to AppleScript, so functionality is never lost; you only gain speed when IMAP is configured and reachable. Failures are absorbed by the `_IMAP_FALLBACK_EXCS` set and a **per-account circuit breaker** (`_imap_breaker_*`, ~30 s cooldown, #118) so a flaky account doesn't pay the connect/login cost on every call.
 
 IMAP connections are created per call by default; an opt-in **connection pool** (`APPLE_MAIL_MCP_IMAP_POOL=1`, #75) amortizes the ~400 ms TCP+TLS+LOGIN across calls.
+
+Metadata-only searches have a second opt-in accelerator, `LocalDbConnector`, enabled with `APPLE_MAIL_MCP_LOCAL_DB=1`. Dispatch order is IMAP, local Envelope Index, then AppleScript. The local connector resolves Mail's account UUID, scopes queries by account and mailbox URL, validates the live SQLite schema, and opens the database in read-only/query-only mode. Queries involving body text or attachments proceed to AppleScript. Any Full Disk Access, ownership, file-shape, or schema failure disables the accelerator for that process and preserves the AppleScript result path.
 
 Fast paths cover search, message/attachment/thread reads, and bulk move, delete, read-status, and flag mutations. A saved draft can use IMAP `APPEND`, while `send_now=true` can submit a clean RFC 822 message over the account’s SMTP server. Both compose paths fall back to AppleScript when the required account configuration is unavailable.
 
@@ -71,6 +71,7 @@ If IMAP isn't configured/reachable, `get_thread` reconstructs the thread via App
 | `server.py`                  | MCP tool registration, validation, elicitation gates, response formatting |
 | `mail_connector.py`          | AppleScript generation/execution + IMAP-fast-path dispatch                |
 | `imap_connector.py`          | IMAP client, connection pool, search/fetch/bulk-mutation fast paths       |
+| `local_db_connector.py`      | Opt-in read-only Envelope Index metadata-search accelerator               |
 | `smtp_sender.py`             | Authenticated SMTP submission for immediate sends                         |
 | `security.py`                | Input sanitization, rate limiting, audit logging, confirmation flows      |
 | `utils.py`                   | Pure functions: escaping, parsing, validation                             |

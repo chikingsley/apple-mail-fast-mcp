@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -11,6 +12,50 @@ from apple_mail_fast_mcp.security import (
     check_test_mode_safety,
     operation_logger,
 )
+
+
+def test_macos_installer_uses_account_derived_peacockery_password_file_env() -> None:
+    """Regression: the deployed password-file variable must match keychain.py."""
+    repo_root = Path(__file__).resolve().parents[2]
+    installer = (repo_root / "scripts/install-macos-launch-agent.sh").read_text()
+    plist = (repo_root / "deploy/macos/studio.peacockery.apple-mail-mcp.plist").read_text()
+    expected = "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_SIMON_PEACOCKERY_STUDIO"
+
+    assert expected in installer
+    assert expected in plist
+    assert "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_PEACOCKERY" not in installer
+    assert "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_PEACOCKERY" not in plist
+
+
+def test_issue_413_macos_installer_wires_known_account_password_files() -> None:
+    """#413: known app-password files persist across service reinstalls."""
+    repo_root = Path(__file__).resolve().parents[2]
+    installer = (repo_root / "scripts/install-macos-launch-agent.sh").read_text()
+    plist = (repo_root / "deploy/macos/studio.peacockery.apple-mail-mcp.plist").read_text()
+    expected = (
+        "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_CHIBUZOR_EJIMOFOR_GMAIL_COM",
+        "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_CHEEZ2012_GMAIL_COM",
+        "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_CHI2137976_MARICOPA_EDU",
+        "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_SIMON_EJIMOFOR30_GMAIL_COM",
+        "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_BLACKKINGRUSSIA_GMAIL_COM",
+        "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_HENRY_EBONGA_GMAIL_COM",
+        "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_CHIBUZOR_EJIMOFOR_OUTLOOK_COM",
+        "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_CHI_WEIGHANCHOR_COM",
+    )
+
+    for env_name in expected:
+        assert env_name in installer
+        assert env_name in plist
+
+
+def test_issue_376_remote_launch_agent_enables_local_metadata_accelerator() -> None:
+    """#376: the dedicated Hochi deployment keeps the opt-in accelerator enabled."""
+    repo_root = Path(__file__).resolve().parents[2]
+    plist = (repo_root / "deploy/macos/studio.peacockery.apple-mail-mcp.plist").read_text()
+
+    assert "<key>APPLE_MAIL_MCP_LOCAL_DB</key>" in plist
+    assert "<string>1</string>" in plist
+
 
 # ---------------------------------------------------------------------------
 # RateLimiter

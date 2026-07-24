@@ -4,7 +4,7 @@ A private MCP service for reading, searching, drafting, sending, and managing em
 
 ## How it works
 
-FastMCP exposes the mail tools over stdio or Streamable HTTP. Reads use server-side IMAP when account credentials are configured and fall back to AppleScript. Mail.app operations run through a resident signed Swift helper over an owner-only Unix socket, so macOS attributes Automation permission to a stable app rather than an ephemeral Python process.
+FastMCP exposes the mail tools over stdio or Streamable HTTP. Reads use server-side IMAP when account credentials are configured. An opt-in read-only local metadata accelerator can serve searches from Mail's Envelope Index when IMAP is unavailable, with AppleScript as the universal fallback. Mail.app operations run through a resident signed Swift helper over an owner-only Unix socket, so macOS attributes Automation permission to a stable app rather than an ephemeral Python process.
 
 The supported remote deployment binds the Python service to `127.0.0.1`, publishes it privately with Tailscale Serve, and requires a bearer token in addition to tailnet membership:
 
@@ -22,6 +22,7 @@ Funnel must remain disabled.
 - Administrator access for the one-time local certificate trust
 - Tailscale on devices that use the remote MCP service
 - An IMAP password file or Keychain entry for fast server-side search
+- Full Disk Access for the service's Python executable when the local metadata accelerator is enabled
 
 ## Install on the Mail host
 
@@ -34,6 +35,8 @@ Clone the repository on the Mac and run:
 The installer creates or reuses a machine-local code-signing identity, performs a locked `uv` sync, builds and signs the native helper, validates secret-file permissions, installs both per-user LaunchAgents, restarts the service, and verifies Mail Automation. On first install, macOS asks for administrator authorization to trust the local signing certificate and asks whether the helper may control Mail. Approve both prompts once; later rebuilds retain the same signed identity.
 
 The current Peacockery deployment reads its IMAP password from `~/.config/apple-mail-fast-mcp/imap-password-peacockery` and its HTTP token from `~/.config/apple-mail-fast-mcp/http-bearer-token`. Both files must be owned by the current user and use mode `0400` or `0600`.
+
+Set `APPLE_MAIL_MCP_LOCAL_DB=1` in the service environment to enable millisecond metadata searches against Mail's read-only Envelope Index. This opt-in path requires Full Disk Access and automatically falls through to AppleScript if access or schema validation fails. IMAP retains priority because it reads the server-authoritative state.
 
 See [Private remote service on macOS](docs/guides/REMOTE_SERVICE.md) for Tailscale Serve, client configuration, logs, and verification commands.
 

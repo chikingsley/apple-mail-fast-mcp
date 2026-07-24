@@ -62,6 +62,26 @@ The installer adds the password-file path to the LaunchAgent only when that file
 
 The process listens at `http://127.0.0.1:8765/mcp`. Keeping the bind address on loopback prevents LAN or public access.
 
+## Enable the local metadata accelerator
+
+The optional local path reads Mail's live Envelope Index in SQLite read-only mode and accelerates metadata-only `search_messages` calls when direct IMAP is unavailable. IMAP retains priority, and content or attachment queries continue to the existing AppleScript fallback.
+
+The supplied MCP LaunchAgent sets `APPLE_MAIL_MCP_LOCAL_DB=1`. Grant Full Disk Access to the Python executable shown by the running service. For this source deployment, resolve the exact executable after installation:
+
+```bash
+service_pid="$(launchctl print "gui/$(id -u)/studio.peacockery.apple-mail-mcp" | awk '/pid =/{print $3; exit}')"
+pgrep -P "${service_pid}" | xargs -I{} ps -p {} -o comm=
+```
+
+Add that absolute executable under **System Settings > Privacy & Security > Full Disk Access**, restart the LaunchAgent, and check the service log for `Local Apple Mail metadata accelerator enabled`:
+
+```bash
+launchctl kickstart -k "gui/$(id -u)/studio.peacockery.apple-mail-mcp"
+tail -n 100 ~/Library/Logs/apple-mail-fast-mcp/service.err.log
+```
+
+`APPLE_MAIL_MCP_LOCAL_DB_PATH` can select a specific `Envelope Index`; the default discovers the newest `~/Library/Mail/V*/MailData/Envelope Index`. The connector validates file ownership and the required schema, opens SQLite with `mode=ro` plus `query_only`, and disables itself for the process after any access or schema failure.
+
 ## Publish through Tailscale Serve
 
 Preserve any existing root handler and add the MCP server under `/apple-mail`:

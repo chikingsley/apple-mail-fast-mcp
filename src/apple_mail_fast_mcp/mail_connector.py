@@ -62,6 +62,11 @@ from .imap_overrides import (
 )
 from .imap_providers import detect_provider
 from .keychain import get_imap_password
+from .local_db_connector import (
+    LocalDbConnector,
+    LocalDbUnavailableError,
+    LocalDbUnsupportedQueryError,
+)
 from .security import send_recipients_test_violation
 from .smtp_sender import SmtpSender
 from .utils import (
@@ -887,6 +892,7 @@ class AppleMailConnector:
         timeout: int = 60,
         *,
         imap_pool: ImapConnectionPool | None = None,
+        local_db: LocalDbConnector | None = None,
         max_attachment_bytes: int = DEFAULT_MAX_ATTACHMENT_BYTES,
         max_total_attachment_bytes: int = DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES,
         max_inline_attachment_bytes: int = DEFAULT_MAX_INLINE_ATTACHMENT_BYTES,
@@ -902,6 +908,9 @@ class AppleMailConnector:
                 across calls, amortizing the ~400 ms TCP+TLS+LOGIN
                 overhead per call. Default None (per-call lifecycle —
                 the v0.5.0 behavior). See issue #75.
+            local_db: Optional read-only Apple Mail Envelope Index accelerator.
+                IMAP remains authoritative when configured; this accelerator
+                fronts the AppleScript metadata-search fallback.
             max_attachment_bytes: Per-attachment byte cap for
                 ``save_attachments`` (disk-fill DoS protection, #236).
             max_total_attachment_bytes: Aggregate byte cap per
@@ -913,6 +922,9 @@ class AppleMailConnector:
         self.timeout = timeout
         self._applescript_socket = _resolve_applescript_socket()
         self._imap_pool = imap_pool
+        self._local_db = local_db
+        self._local_db_disabled = False
+        self._local_db_account_ids: dict[str, str] = {}
         self.max_attachment_bytes = max_attachment_bytes
         self.max_total_attachment_bytes = max_total_attachment_bytes
         self.max_inline_attachment_bytes = max_inline_attachment_bytes
@@ -925,6 +937,64 @@ class AppleMailConnector:
         # (the orchestrator goes straight to the AppleScript path without
         # paying the connect/login round trip).
         self._imap_failure_until: dict[str, float] = {}
+
+    def _resolve_local_db_account_id(self, account: str) -> str:
+        cached = self._local_db_account_ids.get(account)
+        if cached is not None:
+            return cached
+        for candidate in self.list_accounts():
+            name = str(candidate.get("name") or "")
+            account_id = str(candidate.get("id") or "")
+            if account in {name, account_id} and account_id:
+                self._local_db_account_ids[account] = account_id
+                self._local_db_account_ids[name] = account_id
+                return account_id
+        raise MailAccountNotFoundError(f"Account not found: {account}")
+
+    def _try_local_db_search(
+        self,
+        *,
+        account: str,
+        mailbox: str,
+        sender_contains: str | None,
+        subject_contains: str | None,
+        read_status: bool | None,
+        is_flagged: bool | None,
+        date_from: str | None,
+        date_to: str | None,
+        received_within_hours: int | None,
+        has_attachment: bool | None,
+        limit: int | None,
+        include_attachments: bool,
+        body_contains: str | None,
+        text_contains: str | None,
+    ) -> list[dict[str, Any]] | None:
+        if self._local_db is None or self._local_db_disabled:
+            return None
+        try:
+            account_id = self._resolve_local_db_account_id(account)
+            return self._local_db.search_messages(
+                account_id=account_id,
+                mailbox=mailbox,
+                sender_contains=sender_contains,
+                subject_contains=subject_contains,
+                read_status=read_status,
+                is_flagged=is_flagged,
+                date_from=date_from,
+                date_to=date_to,
+                received_within_hours=received_within_hours,
+                has_attachment=has_attachment,
+                limit=limit,
+                include_attachments=include_attachments,
+                body_contains=body_contains,
+                text_contains=text_contains,
+            )
+        except LocalDbUnsupportedQueryError:
+            return None
+        except LocalDbUnavailableError as exc:
+            self._local_db_disabled = True
+            logger.warning("Disabling local Apple Mail metadata accelerator: %s", exc)
+            return None
 
     def _imap_breaker_open(self, account: str) -> bool:
         """True if a recent IMAP failure on this account is still cooling
@@ -1976,6 +2046,25 @@ class AppleMailConnector:
             except _IMAP_FALLBACK_EXCS as exc:
                 self._log_imap_fallback(account, exc)
                 # fall through to AppleScript
+
+        local_result = self._try_local_db_search(
+            account=account,
+            mailbox=mailbox,
+            sender_contains=sender_contains,
+            subject_contains=subject_contains,
+            read_status=read_status,
+            is_flagged=is_flagged,
+            date_from=date_from,
+            date_to=date_to,
+            received_within_hours=received_within_hours,
+            has_attachment=has_attachment,
+            limit=limit,
+            include_attachments=include_attachments,
+            body_contains=body_contains,
+            text_contains=text_contains,
+        )
+        if local_result is not None:
+            return local_result
 
         # We're committed to the AppleScript path. Warn proactively if a
         # body/text search is set — that's the multi-order-of-magnitude

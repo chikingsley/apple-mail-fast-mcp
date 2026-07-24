@@ -45,6 +45,7 @@ from .exceptions import (
     MailUnsupportedRuleActionError,
 )
 from .imap_connector import ImapConnectionPool
+from .local_db_connector import LocalDbConnector
 from .mail_connector import AppleMailConnector
 from .secret_file import SecretFileError, read_secret_file
 from .security import (
@@ -157,6 +158,16 @@ def _register_pool_atexit(pool: ImapConnectionPool | None) -> None:
         atexit.register(pool.close)
 
 
+def _build_local_db_connector() -> LocalDbConnector | None:
+    """Build the opt-in read-only Apple Mail metadata accelerator."""
+    flag = os.getenv("APPLE_MAIL_MCP_LOCAL_DB", "0").strip().lower()
+    if flag not in {"1", "true", "yes", "on"}:
+        return None
+    configured_path = os.getenv("APPLE_MAIL_MCP_LOCAL_DB_PATH", "").strip()
+    logger.info("Local Apple Mail metadata accelerator enabled")
+    return LocalDbConnector(Path(configured_path) if configured_path else None)
+
+
 def _attachment_cap_overrides() -> dict[str, int]:
     """Read optional save_attachments byte-cap overrides from the environment
     (#236), mirroring the APPLE_MAIL_MCP_IMAP_POOL opt-in pattern. Returns
@@ -186,7 +197,11 @@ def _attachment_cap_overrides() -> dict[str, int]:
 
 _imap_pool = _build_imap_pool()
 _register_pool_atexit(_imap_pool)
-mail = AppleMailConnector(imap_pool=_imap_pool, **_attachment_cap_overrides())
+mail = AppleMailConnector(
+    imap_pool=_imap_pool,
+    local_db=_build_local_db_connector(),
+    **_attachment_cap_overrides(),
+)
 
 
 async def _elicit_confirmation(

@@ -11,6 +11,23 @@ readonly LOG_DIR="${HOME}/Library/Logs/apple-mail-fast-mcp"
 readonly CONFIG_DIR="${HOME}/.config/apple-mail-fast-mcp"
 readonly BEARER_TOKEN_FILE="${CONFIG_DIR}/http-bearer-token"
 readonly PEACOCKERY_IMAP_PASSWORD_FILE="${CONFIG_DIR}/imap-password-peacockery"
+readonly PEACOCKERY_IMAP_PASSWORD_FILE_ENV="APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_SIMON_PEACOCKERY_STUDIO"
+readonly CHIBUZOR_IMAP_PASSWORD_FILE="${CONFIG_DIR}/imap-password-chibuzor-ejimofor-gmail-com"
+readonly CHIBUZOR_IMAP_PASSWORD_FILE_ENV="APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_CHIBUZOR_EJIMOFOR_GMAIL_COM"
+readonly CHEEZ_IMAP_PASSWORD_FILE="${CONFIG_DIR}/imap-password-cheez2012-gmail-com"
+readonly CHEEZ_IMAP_PASSWORD_FILE_ENV="APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_CHEEZ2012_GMAIL_COM"
+readonly MARICOPA_IMAP_PASSWORD_FILE="${CONFIG_DIR}/imap-password-chi2137976-maricopa-edu"
+readonly MARICOPA_IMAP_PASSWORD_FILE_ENV="APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_CHI2137976_MARICOPA_EDU"
+readonly SIMON_GMAIL_IMAP_PASSWORD_FILE="${CONFIG_DIR}/imap-password-simon-ejimofor30-gmail-com"
+readonly SIMON_GMAIL_IMAP_PASSWORD_FILE_ENV="APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_SIMON_EJIMOFOR30_GMAIL_COM"
+readonly BLACK_KING_RUSSIA_IMAP_PASSWORD_FILE="${CONFIG_DIR}/imap-password-blackkingrussia-gmail-com"
+readonly BLACK_KING_RUSSIA_IMAP_PASSWORD_FILE_ENV="APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_BLACKKINGRUSSIA_GMAIL_COM"
+readonly HENRY_EBONGA_IMAP_PASSWORD_FILE="${CONFIG_DIR}/imap-password-henry-ebonga-gmail-com"
+readonly HENRY_EBONGA_IMAP_PASSWORD_FILE_ENV="APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_HENRY_EBONGA_GMAIL_COM"
+readonly OUTLOOK_IMAP_PASSWORD_FILE="${CONFIG_DIR}/imap-password-chibuzor-ejimofor-outlook-com"
+readonly OUTLOOK_IMAP_PASSWORD_FILE_ENV="APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_CHIBUZOR_EJIMOFOR_OUTLOOK_COM"
+readonly WEIGHANCHOR_IMAP_PASSWORD_FILE="${CONFIG_DIR}/imap-password-chi-weighanchor-com"
+readonly WEIGHANCHOR_IMAP_PASSWORD_FILE_ENV="APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_CHI_WEIGHANCHOR_COM"
 readonly APPLESCRIPT_HELPER_APP="${HOME}/Applications/Apple Mail MCP Helper.app"
 readonly APPLESCRIPT_HELPER_SOCKET="${CONFIG_DIR}/applescript-helper.sock"
 readonly GUI_DOMAIN="gui/$(id -u)"
@@ -87,18 +104,58 @@ install -m 600 "${SOURCE_PLIST}" "${TARGET_PLIST}"
 /usr/libexec/PlistBuddy -c \
   "Set :EnvironmentVariables:APPLE_MAIL_MCP_APPLESCRIPT_SOCKET ${APPLESCRIPT_HELPER_SOCKET}" \
   "${TARGET_PLIST}"
-if [[ -e "${PEACOCKERY_IMAP_PASSWORD_FILE}" ]]; then
-  validate_secret_file \
-    "${PEACOCKERY_IMAP_PASSWORD_FILE}" \
-    "Peacockery IMAP password"
-  /usr/libexec/PlistBuddy -c \
-    "Set :EnvironmentVariables:APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_PEACOCKERY ${PEACOCKERY_IMAP_PASSWORD_FILE}" \
-    "${TARGET_PLIST}"
-else
-  /usr/libexec/PlistBuddy -c \
-    "Delete :EnvironmentVariables:APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_PEACOCKERY" \
-    "${TARGET_PLIST}"
-fi
+configure_password_file() {
+  local path="$1"
+  local env_name="$2"
+  local label="$3"
+  if [[ -e "${path}" ]]; then
+    validate_secret_file "${path}" "${label}"
+    /usr/libexec/PlistBuddy -c \
+      "Set :EnvironmentVariables:${env_name} ${path}" \
+      "${TARGET_PLIST}"
+  else
+    /usr/libexec/PlistBuddy -c \
+      "Delete :EnvironmentVariables:${env_name}" \
+      "${TARGET_PLIST}"
+  fi
+}
+
+configure_password_file \
+  "${PEACOCKERY_IMAP_PASSWORD_FILE}" \
+  "${PEACOCKERY_IMAP_PASSWORD_FILE_ENV}" \
+  "Peacockery IMAP password"
+configure_password_file \
+  "${CHIBUZOR_IMAP_PASSWORD_FILE}" \
+  "${CHIBUZOR_IMAP_PASSWORD_FILE_ENV}" \
+  "Chibuzor Gmail IMAP password"
+configure_password_file \
+  "${CHEEZ_IMAP_PASSWORD_FILE}" \
+  "${CHEEZ_IMAP_PASSWORD_FILE_ENV}" \
+  "Cheez Gmail IMAP password"
+configure_password_file \
+  "${MARICOPA_IMAP_PASSWORD_FILE}" \
+  "${MARICOPA_IMAP_PASSWORD_FILE_ENV}" \
+  "Maricopa Gmail IMAP password"
+configure_password_file \
+  "${SIMON_GMAIL_IMAP_PASSWORD_FILE}" \
+  "${SIMON_GMAIL_IMAP_PASSWORD_FILE_ENV}" \
+  "Simon Gmail IMAP password"
+configure_password_file \
+  "${BLACK_KING_RUSSIA_IMAP_PASSWORD_FILE}" \
+  "${BLACK_KING_RUSSIA_IMAP_PASSWORD_FILE_ENV}" \
+  "Black King Russia Gmail IMAP password"
+configure_password_file \
+  "${HENRY_EBONGA_IMAP_PASSWORD_FILE}" \
+  "${HENRY_EBONGA_IMAP_PASSWORD_FILE_ENV}" \
+  "Henry Ebonga Gmail IMAP password"
+configure_password_file \
+  "${OUTLOOK_IMAP_PASSWORD_FILE}" \
+  "${OUTLOOK_IMAP_PASSWORD_FILE_ENV}" \
+  "Chibuzor Outlook IMAP password"
+configure_password_file \
+  "${WEIGHANCHOR_IMAP_PASSWORD_FILE}" \
+  "${WEIGHANCHOR_IMAP_PASSWORD_FILE_ENV}" \
+  "WeighAnchor Outlook IMAP password"
 plutil -lint "${TARGET_PLIST}"
 
 launchctl bootout "${GUI_DOMAIN}/${LABEL}" 2>/dev/null || true
