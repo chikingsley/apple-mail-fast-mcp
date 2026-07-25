@@ -3464,11 +3464,15 @@ def _port_arg(value: str) -> int:
 
 
 class HTTPGuard:
-    """Require bearer authentication and reject browser-originated requests."""
+    """Reject browser-originated requests, and bearer-authenticate when asked to.
 
-    def __init__(self, app: ASGIApp, token: str) -> None:
+    A token is optional: on a tailnet the network decides who can reach the
+    port at all, and a second secret on every client buys nothing.
+    """
+
+    def __init__(self, app: ASGIApp, token: str | None) -> None:
         self.app = app
-        self.expected_authorization = f"Bearer {token}".encode()
+        self.expected_authorization = f"Bearer {token}".encode() if token is not None else None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http":
@@ -3478,6 +3482,9 @@ class HTTPGuard:
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
         if b"origin" in headers:
             await self._reject(send, 403, b"Origin requests are not allowed")
+            return
+        if self.expected_authorization is None:
+            await self.app(scope, receive, send)
             return
         supplied = headers.get(b"authorization", b"")
         if not hmac.compare_digest(supplied, self.expected_authorization):
@@ -3667,9 +3674,13 @@ def main(argv: list[str] | None = None) -> int:
             "Only the 9 read tools are registered."
         )
     if args.transport == "http":
-        token = _load_http_bearer_token(
-            token_file=args.bearer_token_file,
-            token_env=args.bearer_token_env,
+        token = (
+            _load_http_bearer_token(
+                token_file=args.bearer_token_file,
+                token_env=args.bearer_token_env,
+            )
+            if args.bearer_token_file or os.environ.get(args.bearer_token_env, "").strip()
+            else None
         )
         logger.info(
             "Starting Apple Mail MCP server at http://%s:%d%s",
