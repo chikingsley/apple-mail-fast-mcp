@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 apple-mail-fast-mcp = "apple_mail_fast_mcp.server:main"
+apple-mail-fleet = "apple_mail_fast_mcp.fleet:main"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13"]
@@ -70,6 +71,7 @@ convention = "pep257"
 "src/apple_mail_fast_mcp/junk_providers.py" = ["S404", "S603"]
 "src/apple_mail_fast_mcp/mail_connector.py" = ["S404", "S603"]
 "src/apple_mail_fast_mcp/security.py" = ["S404", "S603"]
+"src/apple_mail_fast_mcp/fleet_support.py" = ["S404", "S603"]
 "tests/**/*.py" = [
     "ANN", "ARG", "DTZ", "PLC0415", "PLC1901", "PLC2701", "PLR", "PT", "S",
     "SLF001", "TC",

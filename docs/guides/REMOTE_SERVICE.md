@@ -4,7 +4,21 @@ Run one Apple Mail MCP process on the Mac that owns Mail.app, then reach it from
 
 ## Install the LaunchAgent
 
-From the repository checkout on the Mac:
+For the Peacockery fleet, run the repository-owned release command from a clean,
+pushed `main` checkout on GMK:
+
+```bash
+uv run apple-mail-fleet
+```
+
+It streams `git archive` over SSH into
+`~/.local/share/peacockery/apple-mail/releases/<commit>`, installs both
+LaunchAgents from that immutable tree, updates the `current` symlink, configures
+the Tailscale Serve path and agent clients, distributes the Apple Mail skill,
+and verifies the live MCP endpoint. Existing Hochi development checkouts stay
+independent from the running service.
+
+For direct development or recovery from a repository checkout on the Mac:
 
 ```bash
 ./scripts/install-macos-launch-agent.sh
@@ -144,4 +158,7 @@ tail -n 100 ~/Library/Logs/apple-mail-fast-mcp/service.err.log
 tail -n 100 ~/Library/Logs/apple-mail-fast-mcp/helper.err.log
 ```
 
-After updating the checkout, rerun `./scripts/install-macos-launch-agent.sh`. The installer rebuilds the native helper, performs a locked sync, and restarts only this LaunchAgent. If the helper source changed and the install uses an ad-hoc signature, grant Mail Automation again.
+After pushing a fleet update to `main`, run `uv run apple-mail-fleet` on GMK.
+The command rebuilds the native helper, performs a locked sync, refreshes the
+configured harnesses and skill copies, then verifies the service. Direct Mac
+development uses `./scripts/install-macos-launch-agent.sh`.

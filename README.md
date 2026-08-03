@@ -26,7 +26,20 @@ Funnel must remain disabled.
 
 ## Install on the Mail host
 
-Clone the repository on the Mac and run:
+The supported Peacockery release path runs from a clean, pushed `main` checkout
+on GMK:
+
+```bash
+uv run apple-mail-fleet
+```
+
+The fleet command creates an immutable Git-archive release on Hochi, installs
+the LaunchAgents from that release, preserves owner-only credentials, publishes
+the private Tailscale Serve path, configures each installed agent harness, and
+distributes the repository-owned Apple Mail skill across the fleet. It leaves
+existing development checkouts untouched.
+
+For direct development or recovery on the Mac, run:
 
 ```bash
 ./scripts/install-macos-launch-agent.sh
@@ -39,6 +52,9 @@ The current Peacockery deployment reads its IMAP password from `~/.config/apple-
 Set `APPLE_MAIL_MCP_LOCAL_DB=1` in the service environment to enable millisecond metadata searches against Mail's read-only Envelope Index. This opt-in path requires Full Disk Access and automatically falls through to AppleScript if access or schema validation fails. IMAP retains priority because it reads the server-authoritative state.
 
 See [Private remote service on macOS](docs/guides/REMOTE_SERVICE.md) for Tailscale Serve, client configuration, logs, and verification commands.
+
+Use `uv run apple-mail-fleet --help` for scoped repair options such as
+`--local-only`, `--skip-deploy`, and `--skip-clients`.
 
 ## Run from source
 

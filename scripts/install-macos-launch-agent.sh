@@ -77,13 +77,11 @@ if [[ -L "${BEARER_TOKEN_FILE}" ]]; then
   echo "HTTP bearer token must not be a symlink: ${BEARER_TOKEN_FILE}" >&2
   exit 1
 fi
-if [[ -n "${APPLE_MAIL_MCP_BEARER_TOKEN:-}" && ! -e "${BEARER_TOKEN_FILE}" ]]; then
+if [[ ! -e "${BEARER_TOKEN_FILE}" ]]; then
   umask 077
   openssl rand -hex 32 >"${BEARER_TOKEN_FILE}"
 fi
-if [[ -n "${APPLE_MAIL_MCP_BEARER_TOKEN:-}" ]]; then
-  validate_secret_file "${BEARER_TOKEN_FILE}" "HTTP bearer token"
-fi
+validate_secret_file "${BEARER_TOKEN_FILE}" "HTTP bearer token"
 
 "${SCRIPT_DIR}/install-macos-helper.sh"
 if [[ ! -S "${APPLESCRIPT_HELPER_SOCKET}" || -L "${APPLESCRIPT_HELPER_SOCKET}" ]]; then
@@ -104,13 +102,8 @@ install -m 600 "${SOURCE_PLIST}" "${TARGET_PLIST}"
   "Set :StandardErrorPath ${LOG_DIR}/service.err.log" "${TARGET_PLIST}"
 /usr/libexec/PlistBuddy -c \
   "Set :ProgramArguments:9 ${LISTEN_HOST}" "${TARGET_PLIST}"
-if [[ -n "${APPLE_MAIL_MCP_BEARER_TOKEN:-}" ]]; then
-  /usr/libexec/PlistBuddy -c \
-    "Set :ProgramArguments:15 ${BEARER_TOKEN_FILE}" "${TARGET_PLIST}"
-else
-  /usr/libexec/PlistBuddy -c "Delete :ProgramArguments:15" "${TARGET_PLIST}"
-  /usr/libexec/PlistBuddy -c "Delete :ProgramArguments:14" "${TARGET_PLIST}"
-fi
+/usr/libexec/PlistBuddy -c \
+  "Set :ProgramArguments:15 ${BEARER_TOKEN_FILE}" "${TARGET_PLIST}"
 /usr/libexec/PlistBuddy -c \
   "Set :EnvironmentVariables:APPLE_MAIL_MCP_APPLESCRIPT_SOCKET ${APPLESCRIPT_HELPER_SOCKET}" \
   "${TARGET_PLIST}"
@@ -185,9 +178,7 @@ launchctl print "${GUI_DOMAIN}/${LABEL}"
 
 echo "Apple Mail MCP is listening on http://${LISTEN_HOST}:8765/mcp"
 echo "AppleScript helper: ${APPLESCRIPT_HELPER_APP}"
-if [[ -n "${APPLE_MAIL_MCP_BEARER_TOKEN:-}" ]]; then
-  echo "Bearer token file: ${BEARER_TOKEN_FILE}"
-fi
+echo "Bearer token file: ${BEARER_TOKEN_FILE}"
 if [[ -e "${PEACOCKERY_IMAP_PASSWORD_FILE}" ]]; then
   echo "Peacockery IMAP password file enabled."
 else

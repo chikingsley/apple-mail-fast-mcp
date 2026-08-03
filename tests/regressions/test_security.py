@@ -57,6 +57,17 @@ def test_issue_376_remote_launch_agent_enables_local_metadata_accelerator() -> N
     assert "<string>1</string>" in plist
 
 
+def test_regression_macos_installer_always_enables_http_bearer_authentication() -> None:
+    """Regression: a reinstall must never silently publish an unauthenticated MCP."""
+    repo_root = Path(__file__).resolve().parents[2]
+    installer = (repo_root / "scripts/install-macos-launch-agent.sh").read_text()
+
+    assert 'if [[ ! -e "${BEARER_TOKEN_FILE}" ]]' in installer
+    assert 'validate_secret_file "${BEARER_TOKEN_FILE}" "HTTP bearer token"' in installer
+    assert '"Set :ProgramArguments:15 ${BEARER_TOKEN_FILE}"' in installer
+    assert "Delete :ProgramArguments:15" not in installer
+
+
 # ---------------------------------------------------------------------------
 # RateLimiter
 # ---------------------------------------------------------------------------

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- A repository-owned `apple-mail-fleet` command now creates immutable Hochi
+  releases, configures the private Tailscale Serve endpoint in installed Codex,
+  Claude, OpenCode, and Kimi harnesses, distributes a shared Apple Mail skill,
+  and verifies service, client, and skill state across the agent fleet.
+
+### Security
+
+- The macOS LaunchAgent installer now always creates or reuses an owner-only
+  HTTP bearer token and always enables bearer authentication on the service.
+
 ## [0.10.2] - 2026-06-13
 
 A bug-fix patch release for four reliability and data-integrity issues surfaced from real Claude Desktop usage on Gmail and iCloud: a full-body read that could crash the whole server, a Gmail label move that silently trashed the message, an IMAP search that silently dropped matching results, and an attachment save that hung for minutes on Gmail. No new tools (still 24).

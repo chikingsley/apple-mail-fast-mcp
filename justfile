@@ -31,3 +31,6 @@ live-send:
 
 install-macos:
     ./scripts/install-macos-launch-agent.sh
+
+fleet:
+    uv run apple-mail-fleet
