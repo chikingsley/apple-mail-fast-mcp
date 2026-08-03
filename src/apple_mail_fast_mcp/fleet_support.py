@@ -51,6 +51,7 @@ def run(
         cwd=cwd,
         input=input_text,
         stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.PIPE if capture else None,
         text=True,
     )
 
