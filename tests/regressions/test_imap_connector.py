@@ -4,12 +4,12 @@ from datetime import datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from imapclient.exceptions import IMAPClientError
 from imapclient.response_types import Address, Envelope
 
-from apple_mail_fast_mcp.imap_connector import (
-    ImapConnector,
-)
+from apple_mail_fast_mcp.exceptions import MailMailboxNotFoundError
+from apple_mail_fast_mcp.imap_connector import ImapConnector
 
 type FolderListing = list[tuple[tuple[bytes, ...], bytes, str]]
 
@@ -70,6 +70,23 @@ _BS_PLAIN_TEXT_LEAF = (
     None,
     None,
 )
+
+
+class TestMailboxSelectionErrors:
+    """A caller typo stays local and never masquerades as account failure."""
+
+    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    def test_nonexistent_mailbox_is_typed_input_error(self, mock_cls: MagicMock) -> None:
+        """Regression: NONEXISTENT identifies a bad mailbox, not an account outage."""
+        client = mock_cls.return_value
+        client.select_folder.side_effect = IMAPClientError(
+            "select failed: [NONEXISTENT] Unknown Mailbox: Trash"
+        )
+
+        connector = ImapConnector("imap.example.com", 993, "user@example.com", "secret")
+
+        with pytest.raises(MailMailboxNotFoundError, match="'Trash'"):
+            connector.search_messages(mailbox="Trash")
 
 
 class TestLimitWithHasAttachmentFilter:

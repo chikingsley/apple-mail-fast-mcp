@@ -182,15 +182,17 @@ class TestMailIntegration:
         """Real list_rules returns structured rule records.
 
         Rules list may be empty for a user who has never configured any. Empty
-        is a valid pass. Non-empty entries must have name + enabled with the
-        right types.
+        is a valid pass. Non-empty entries must have name, enabled, and action
+        state with the right types.
         """
         result = connector.list_rules()
         assert isinstance(result, list)
         for rule in result:
-            assert set(rule.keys()) >= {"name", "enabled"}
+            assert set(rule.keys()) >= {"name", "enabled", "actions"}
             assert isinstance(rule["name"], str) and rule["name"]
             assert isinstance(rule["enabled"], bool)
+            assert isinstance(rule["actions"], dict)
+            assert isinstance(rule["actions"]["mark_flagged"], bool)
 
     def test_get_thread_orphan_anchor(
         self, connector: AppleMailConnector, test_account: str

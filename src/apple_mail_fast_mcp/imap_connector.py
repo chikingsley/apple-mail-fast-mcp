@@ -38,6 +38,7 @@ from .draft_builder import ForwardedAttachment, extract_attachment_payloads
 from .exceptions import (
     MailImapMoveUnsupportedError,
     MailImapTrashNotFoundError,
+    MailMailboxNotFoundError,
     MailMessageNotFoundError,
 )
 
@@ -68,6 +69,31 @@ would otherwise kill a legitimate server-side SEARCH (10–20s on a large
 iCloud mailbox) mid-operation, silently dropping the IMAP fast path to the
 slower AppleScript fallback. We connect fast (offline detection) then raise
 the timeout for real work. (#249)"""
+
+
+def _select_folder(client: IMAPClient, mailbox: str, *, readonly: bool) -> dict[bytes, Any]:
+    """Select a mailbox while preserving a missing-mailbox input error.
+
+    IMAPClient exposes tagged ``NONEXISTENT`` responses as the same broad
+    ``IMAPClientError`` used for transport and protocol failures.  A misspelled
+    mailbox is local to one call: it must surface to the caller instead of
+    opening the account-wide IMAP circuit breaker and sending later reads down
+    the much slower AppleScript fallback path.
+    """
+    try:
+        return client.select_folder(mailbox, readonly=readonly)
+    except IMAPClientError as exc:
+        message = str(exc).casefold()
+        missing_markers = (
+            "nonexistent",
+            "no such mailbox",
+            "mailbox does not exist",
+            "mailbox doesn't exist",
+            "unknown mailbox",
+        )
+        if any(marker in message for marker in missing_markers):
+            raise MailMailboxNotFoundError(f"Mailbox {mailbox!r} does not exist.") from exc
+        raise
 
 
 def _apply_operation_timeout(client: IMAPClient) -> None:
@@ -908,7 +934,7 @@ class ImapConnector:
         charset = _search_charset(criteria)
 
         with self._session() as client:
-            client.select_folder(mailbox, readonly=True)
+            _select_folder(client, mailbox, readonly=True)
 
             # Pass charset only when a non-ASCII term needs it — keeps ASCII
             # searches on the default us-ascii path (max server compatibility)
@@ -1078,7 +1104,7 @@ class ImapConnector:
             fetch_keys.append(b"BODYSTRUCTURE")
 
         with self._session() as client:
-            client.select_folder(mailbox, readonly=True)
+            _select_folder(client, mailbox, readonly=True)
 
             uids = client.search(["HEADER", "Message-ID", bracketed])
             if not uids:

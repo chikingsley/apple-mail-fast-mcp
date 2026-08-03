@@ -1296,6 +1296,10 @@ class AppleMailConnector:
               - name: rule display name (NOT guaranteed unique — Mail
                 allows duplicates).
               - enabled: whether the rule is currently enabled.
+              - actions: the rule's native action switches.  This exposes
+                the actions that commonly explain message-state changes,
+                including ``mark_flagged`` and ``mark_read``, without
+                requiring a mutating rule update merely to inspect it.
 
         Note:
             Mail.app does not expose a stable rule id via AppleScript;
@@ -1310,7 +1314,8 @@ class AppleMailConnector:
             set ruleCount to count of rules
             repeat with i from 1 to ruleCount
                 set r to rule i
-                set ruleRecord to {|index|:i, |name|:(name of r), |enabled|:(enabled of r)}
+                set actionRecord to {|mark_read|:(mark read of r), |mark_flagged|:(mark flagged of r), |mark_flag_index|:(mark flag index of r), |delete_message|:(delete message of r), |should_move_message|:(should move message of r), |should_copy_message|:(should copy message of r), |forward_message|:(forward message of r)}
+                set ruleRecord to {|index|:i, |name|:(name of r), |enabled|:(enabled of r), |actions|:actionRecord}
                 set end of resultData to ruleRecord
             end repeat
         end tell

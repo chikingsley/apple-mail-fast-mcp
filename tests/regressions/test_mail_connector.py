@@ -137,6 +137,8 @@ class TestAppleMailConnector:
         # Iterates by index, not by reference, so the loop variable is the index.
         assert "repeat with i from 1 to ruleCount" in script
         assert "|index|:i" in script
+        assert "|mark_flagged|:(mark flagged of r)" in script
+        assert "|actions|:actionRecord" in script
 
     # --- set_rule_enabled ------------------------------------------------
 
@@ -431,6 +433,23 @@ class TestAppleMailConnector:
         connector._log_imap_fallback("iCloud", MailMessageNotFoundError("not in INBOX"))
         assert "iCloud" not in connector._imap_failure_until
         assert connector._imap_breaker_open("iCloud") is False
+
+    @patch.object(AppleMailConnector, "_search_messages_applescript")
+    @patch.object(AppleMailConnector, "_imap_search")
+    def test_missing_mailbox_surfaces_without_opening_breaker(
+        self,
+        mock_imap_search: MagicMock,
+        mock_applescript: MagicMock,
+        connector: AppleMailConnector,
+    ) -> None:
+        """Regression: a bad mailbox path is a caller error, not an account outage."""
+        mock_imap_search.side_effect = MailMailboxNotFoundError("Mailbox 'Trash' does not exist")
+
+        with pytest.raises(MailMailboxNotFoundError):
+            connector.search_messages(account="Gmail", mailbox="Trash")
+
+        assert connector._imap_breaker_open("Gmail") is False
+        mock_applescript.assert_not_called()
 
     # --- _imap_search helper ---------------------------------------------
 

@@ -320,10 +320,12 @@ def list_rules() -> dict[str, Any]:
     """
     List all Mail.app rules (read-only).
 
-    Returns each rule's display name and enabled state. Rule names are NOT
-    guaranteed unique — Mail allows duplicates — and rules have no stable
-    id via AppleScript. This tool is read-only; mutation (enable/disable,
-    create, delete) is tracked as a separate enhancement.
+    Returns each rule's display name, enabled state, and native action
+    switches. This makes automatic state changes such as ``mark_flagged``
+    visible during rule audits. Rule names are NOT guaranteed unique — Mail
+    allows duplicates — and rules have no stable id via AppleScript. This tool
+    is read-only; mutation (enable/disable, create, delete) is tracked as a
+    separate enhancement.
 
     Returns:
         Dictionary containing the rules list.
@@ -1229,8 +1231,15 @@ def get_messages(
         account: Mail.app account name. Together with ``mailbox``, activates
             the IMAP fast path for explicit ids: one round-trip lookup
             instead of an account×mailbox AppleScript scan (issue #72).
-            Ignored for the ``"SELECTED"`` sentinel (selection is global).
+            Forward the same account returned by ``search_messages`` whenever
+            fetching its result ids. Ignored for the ``"SELECTED"`` sentinel
+            (selection is global).
         mailbox: Folder to look in for the IMAP fast path (e.g. "INBOX").
+            Forward the exact mailbox path returned by ``search_messages``;
+            Gmail system folders use full paths such as ``[Gmail]/All Mail``
+            and ``[Gmail]/Trash``. Pairing account and mailbox keeps body
+            retrieval scoped, fast, and on the same identifier semantics as
+            the search that produced the ids.
         include_attachments: Include per-attachment metadata (name,
             mime_type, size, downloaded) on each message (default: True).
             Bounded cost — id-list cardinality is typically 1-10. Free on

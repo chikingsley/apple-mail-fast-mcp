@@ -161,14 +161,15 @@ Retrieve full details of one or more messages, with bodies. Returns a list (alwa
 | `message_ids` | list[string] | Yes | - | List of message ids to fetch. May include the literal token `"SELECTED"` (server-resolved to Mail.app's current UI selection at call time). Mixed lists like `["SELECTED", "12345"]` are valid. Empty list is a no-op. |
 | `include_content` | boolean | No | true | Include message bodies |
 | `headers_only` | boolean | No | false | IMAP fast-path optimization for explicit ids; ignored on AppleScript fallback |
-| `account` | string | No | None | Mail.app account name. With `mailbox`, activates the IMAP fast path for explicit ids (issue #72) |
-| `mailbox` | string | No | None | Folder for the IMAP fast path (e.g. "INBOX") |
+| `account` | string | No | None | Mail.app account name. With `mailbox`, activates the IMAP fast path for explicit ids (issue #72). Forward the account returned by `search_messages` when fetching its result ids. |
+| `mailbox` | string | No | None | Exact folder path for the IMAP fast path. Forward the mailbox returned by `search_messages`; Gmail system folders use full paths such as `[Gmail]/All Mail` and `[Gmail]/Trash`. |
 | `include_attachments` | boolean | No | true | When true, each message gains an `attachments: [{name, mime_type, size, downloaded}]` field. Default on for `get_messages` because id-list cardinality is bounded (typically 1-10) — cost is acceptable on both paths. |
 
 **Notes:**
 - Missing ids drop out silently — the response contains whatever was found (partial-results convention).
 - The `"SELECTED"` sentinel is resolved server-side via `mail.get_selected_messages()` at call time. Empty selection expands to nothing.
 - Pair with `search_messages` (metadata-only, criteria-based) and `get_thread` (thread member ids) to fetch bodies for specific messages.
+- When ids come from `search_messages`, pass its same `account` and exact `mailbox` into `get_messages`. This preserves the fast IMAP path and consistent id semantics; omitting the scope invokes the global AppleScript lookup.
 - **Body bounding (#365):** each `content` is scrubbed of transport-hostile characters (control bytes, non-UTF8-encodable codepoints) and capped at **1 MB** of UTF-8 text so a single large or malformed body can't crash the stdio server. When a body is truncated, the message carries `content_truncated: true` and `content_original_bytes: <int>`. Override the cap with `APPLE_MAIL_MCP_MAX_BODY_BYTES` (positive integer bytes).
 
 **Performance note (path-dependent cost):**
