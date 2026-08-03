@@ -1,0 +1,24 @@
+{
+  "mode": "delete",
+  "minimum_domains": 3,
+  "minimum_messages": 3,
+  "observation_window_days": 30,
+  "maximum_deletions_per_run": 25,
+  "notification_webhook_file": "~/.config/apple-mail-fast-mcp/discord-webhook",
+  "providers": {
+    "blackkingrussia@gmail.com": {"kind": "gmail"},
+    "cheez2012@gmail.com": {"kind": "gmail"},
+    "chi2137976@maricopa.edu": {"kind": "gmail"},
+    "chibuzor.ejimofor@gmail.com": {"kind": "gmail"},
+    "henry.ebonga@gmail.com": {"kind": "gmail"},
+    "simon.ejimofor30@gmail.com": {"kind": "gmail"},
+    "chibuzor.ejimofor@outlook.com": {
+      "kind": "microsoft",
+      "credential": "outlook-personal"
+    },
+    "chi@weighanchor.com": {
+      "kind": "microsoft",
+      "credential": "weighanchor"
+    }
+  }
+}

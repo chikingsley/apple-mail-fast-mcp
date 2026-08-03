@@ -67,6 +67,7 @@ convention = "pep257"
 "scripts/check_*.py" = ["INP001"]
 "src/apple_mail_fast_mcp/cli.py" = ["SLF001"]
 "src/apple_mail_fast_mcp/keychain.py" = ["S404", "S603"]
+"src/apple_mail_fast_mcp/junk_providers.py" = ["S404", "S603"]
 "src/apple_mail_fast_mcp/mail_connector.py" = ["S404", "S603"]
 "src/apple_mail_fast_mcp/security.py" = ["S404", "S603"]
 "tests/**/*.py" = [
