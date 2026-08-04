@@ -21,6 +21,7 @@ def test_junk_regression_discovers_each_enabled_accounts_junk_mailbox() -> None:
     connector.list_accounts.return_value = [
         {"id": "UUID-GMAIL", "name": "first@gmail.com", "enabled": True},
         {"id": "UUID-OUTLOOK", "name": "second@outlook.com", "enabled": True},
+        {"id": "UUID-IMAP", "name": "third@example.com", "enabled": True},
         {"id": "UUID-DISABLED", "name": "disabled@example.com", "enabled": False},
     ]
     connector.list_mailboxes.side_effect = lambda account: {
@@ -29,11 +30,13 @@ def test_junk_regression_discovers_each_enabled_accounts_junk_mailbox() -> None:
             {"name": "Spam", "path": "[Gmail]/Spam"},
         ],
         "UUID-OUTLOOK": [{"name": "Junk Email", "path": "Junk Email"}],
+        "UUID-IMAP": [{"name": "Junk Mail", "path": "Junk Mail"}],
     }[account]
 
     assert junk_mailboxes(connector) == [
         JunkMailbox("UUID-GMAIL", "first@gmail.com", "[Gmail]/Spam"),
         JunkMailbox("UUID-OUTLOOK", "second@outlook.com", "Junk Email"),
+        JunkMailbox("UUID-IMAP", "third@example.com", "Junk Mail"),
     ]
 
 

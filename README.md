@@ -40,7 +40,7 @@ For direct development or recovery on the Mac, run:
 ./scripts/install-macos-launch-agent.sh
 ```
 
-The release installs three explicit components: a resident signed AppleScript helper, a resident authenticated MCP service, and one five-minute operations supervisor that exits between runs. The supervisor captures and clears provider-supplied Junk flags before isolated provider health and permanent deletion stages. A provider failure can defer its own deletions while flag cleanup and every other account continue. Account-scoped authentication recovery runs provider CLIs directly; Microsoft device codes arrive as their own copyable Discord messages.
+The release installs three explicit components: a resident signed AppleScript helper, a resident authenticated MCP service, and one five-minute operations supervisor that exits between runs. The supervisor captures and clears provider-supplied Junk flags before isolated provider health and permanent deletion stages across every enabled Junk, Junk Email, Junk Mail, and Spam folder. Gmail and Microsoft use provider APIs; standard IMAP accounts use scoped UID EXPUNGE when the server advertises UIDPLUS. A provider failure can defer its own deletions while flag cleanup and every other account continue. Account-scoped authentication recovery runs provider CLIs directly; Microsoft device codes arrive as their own copyable Discord messages.
 
 Inspect the complete Apple Mail inventory, latest supervisor result, and every other user LaunchAgent on Hochi with:
 

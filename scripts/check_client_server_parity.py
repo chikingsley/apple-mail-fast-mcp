@@ -11,6 +11,7 @@ SERVER = ROOT / "src/apple_mail_fast_mcp/server.py"
 
 INTENTIONALLY_INTERNAL = {
     "auto_template_vars",
+    "check_imap_health",
     "extract_draft_attachments",
     "find_message_by_message_id",
     "flag_message",
@@ -20,6 +21,7 @@ INTENTIONALLY_INTERNAL = {
     "get_selected_messages",
     "mark_as_read",
     "move_messages",
+    "permanently_delete_imap_message",
     "set_rule_enabled",
 }
 

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-JUNK_MAILBOX_NAMES = frozenset({"junk", "junk email", "spam"})
+JUNK_MAILBOX_NAMES = frozenset({"junk", "junk email", "junk mail", "spam"})
 FLAG_BATCH_SIZE = 100
 MAX_FLAG_BATCHES = 100
 DEFAULT_CONFIG = Path("~/.config/apple-mail-fast-mcp/mail-ops.json").expanduser()
@@ -93,8 +93,11 @@ class JunkCleanerConfig:
             raise ValueError("observation_window_days must be between 1 and 90")
         if not 1 <= self.maximum_deletions_per_run <= 100:
             raise ValueError("maximum_deletions_per_run must be between 1 and 100")
-        if any(provider.kind not in {"gmail", "microsoft"} for provider in self.providers.values()):
-            raise ValueError("Every junk provider must be gmail or microsoft")
+        if any(
+            provider.kind not in {"gmail", "imap", "microsoft"}
+            for provider in self.providers.values()
+        ):
+            raise ValueError("Every junk provider must be gmail, imap, or microsoft")
 
 
 def junk_mailboxes(connector: AppleMailConnector) -> list[JunkMailbox]:
@@ -187,6 +190,8 @@ def _process_candidates(
     config: JunkCleanerConfig,
     provider: ProviderAccount,
     source_home: Path,
+    connector: AppleMailConnector,
+    source_mailbox: str,
     deletions_remaining: int,
 ) -> tuple[int, int, int, int]:
     """Observe or delete one mailbox's bounded candidate set."""
@@ -205,6 +210,8 @@ def _process_candidates(
                     provider,
                     email_account=message.account,
                     source_home=source_home,
+                    source_mailbox=source_mailbox,
+                    connector=connector,
                 )
             deleted = purger.permanently_delete(message.rfc_message_id)
             store.record_action(message, status="deleted", detail=f"provider copies: {deleted}")
@@ -239,7 +246,8 @@ def clean_junk(
     )
     results: list[dict[str, object]] = []
     inventories: list[tuple[dict[str, object], JunkMailbox, list[JunkMessage], set[str]]] = []
-    for junk_mailbox in junk_mailboxes(connector):
+    discovered_mailboxes = junk_mailboxes(connector)
+    for junk_mailbox in discovered_mailboxes:
         account = junk_mailbox.provider_account
         mailbox = junk_mailbox.path
         result: dict[str, object] = {
@@ -273,6 +281,8 @@ def clean_junk(
         providers=config.providers,
         store=store,
         source_home=source_home,
+        connector=connector,
+        mailboxes={mailbox.provider_account: mailbox.path for mailbox in discovered_mailboxes},
         notifier=notifier,
     )
     recovery_dispatch_error = ""
@@ -311,6 +321,8 @@ def clean_junk(
             config=config,
             provider=provider,
             source_home=source_home,
+            connector=connector,
+            source_mailbox=junk_mailbox.path,
             deletions_remaining=deletions_remaining,
         )
         result["reported"] = reported

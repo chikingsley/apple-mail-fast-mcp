@@ -17,6 +17,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+class ImapDeleteConnector(Protocol):
+    """Narrow connector boundary for standard IMAP Junk cleanup."""
+
+    def check_imap_health(self, account: str, mailbox: str) -> None: ...
+
+    def permanently_delete_imap_message(
+        self, *, account: str, mailbox: str, rfc_message_id: str
+    ) -> int: ...
+
+
 class PermanentDeleteError(RuntimeError):
     """A provider could not resolve or permanently delete a junk message."""
 
@@ -283,13 +293,45 @@ class MicrosoftPurger:
         return len(valid_ids)
 
 
+@dataclass(frozen=True)
+class ImapPurger:
+    """Use scoped UID EXPUNGE for a standard IMAP Junk mailbox."""
+
+    account: str
+    mailbox: str
+    connector: ImapDeleteConnector
+
+    def check_health(self) -> None:
+        """Prove direct IMAP access to the configured Junk mailbox."""
+        try:
+            self.connector.check_imap_health(self.account, self.mailbox)
+        except Exception as exc:
+            raise PermanentDeleteError(str(exc) or "IMAP health check failed") from exc
+
+    def permanently_delete(self, rfc_message_id: str) -> int:
+        """Permanently delete one RFC Message-ID from the configured Junk mailbox."""
+        try:
+            deleted = self.connector.permanently_delete_imap_message(
+                account=self.account,
+                mailbox=self.mailbox,
+                rfc_message_id=rfc_message_id,
+            )
+        except Exception as exc:
+            raise PermanentDeleteError(str(exc) or "IMAP permanent deletion failed") from exc
+        if deleted < 1:
+            raise PermanentDeleteError("IMAP could not resolve the message in Junk")
+        return deleted
+
+
 def build_purger(
     account: ProviderAccount,
     *,
     email_account: str,
     source_home: Path,
+    source_mailbox: str | None = None,
+    connector: ImapDeleteConnector | None = None,
     runner: CommandRunner = run_command,
-) -> GmailPurger | MicrosoftPurger:
+) -> GmailPurger | MicrosoftPurger | ImapPurger:
     """Build the configured provider adapter for one Apple Mail account."""
     if account.kind == "gmail":
         gog_path = shutil.which("gog")
@@ -307,5 +349,13 @@ def build_purger(
             m365_path=m365_path,
             source_home=source_home,
             runner=runner,
+        )
+    if account.kind == "imap":
+        if connector is None or source_mailbox is None:
+            raise PermanentDeleteError("IMAP cleanup requires its connector and Junk mailbox")
+        return ImapPurger(
+            account=account.credential or email_account,
+            mailbox=source_mailbox,
+            connector=connector,
         )
     raise PermanentDeleteError(f"Unsupported junk provider: {account.kind}")

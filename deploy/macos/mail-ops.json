@@ -20,6 +20,9 @@
       "kind": "microsoft",
       "credential": "outlook-personal"
     },
+    "simon@peacockery.studio": {
+      "kind": "imap"
+    },
     "chi@weighanchor.com": {
       "kind": "microsoft",
       "credential": "weighanchor"

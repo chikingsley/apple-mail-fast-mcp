@@ -1691,6 +1691,27 @@ class ImapConnector:
                 client.uid_expunge(uids)
             return len(uids)
 
+    def permanently_delete_messages(
+        self,
+        message_ids: list[str],
+        source_mailbox: str,
+    ) -> int:
+        """Permanently remove exact RFC Message-IDs with scoped UID EXPUNGE."""
+        _validate_message_ids(message_ids)
+        _reject_control_chars(source_mailbox, "source_mailbox")
+        with self._session() as client:
+            client.select_folder(source_mailbox, readonly=False)
+            if not self._has_capability(client, b"UIDPLUS"):
+                raise MailImapMoveUnsupportedError(
+                    f"IMAP server at {self._host} lacks UIDPLUS; scoped permanent deletion is unsafe"
+                )
+            uids = self._resolve_uids_batch(client, message_ids)
+            if not uids:
+                return 0
+            client.add_flags(uids, [b"\\Deleted"], silent=True)
+            client.uid_expunge(uids)
+            return len(uids)
+
     def set_read_status(
         self,
         message_ids: list[str],

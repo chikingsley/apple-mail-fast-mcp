@@ -542,6 +542,25 @@ class TestImapDeleteMessages:
             f"select_folder (call #{select_idx}) — see #199"
         )
 
+    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    def test_permanent_delete_uses_scoped_uid_expunge(self, mock_cls: MagicMock) -> None:
+        """Regression: standard IMAP Junk cleanup must expunge only matched UIDs."""
+        client = MagicMock()
+        mock_cls.return_value = client
+        client.capabilities.return_value = {b"UIDPLUS"}
+        client.search.return_value = [7]
+
+        deleted = ImapConnector("h", 993, "u@e.com", "pw").permanently_delete_messages(
+            ["a@x"],
+            source_mailbox="Junk Mail",
+        )
+
+        assert deleted == 1
+        client.add_flags.assert_called_once_with([7], [b"\\Deleted"], silent=True)
+        client.uid_expunge.assert_called_once_with([7])
+        client.move.assert_not_called()
+        client.copy.assert_not_called()
+
 
 class TestImapSetReadStatus:
     """Issue #151: server-side read/unread via UID STORE +/-FLAGS

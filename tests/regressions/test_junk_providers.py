@@ -9,6 +9,7 @@ import pytest
 
 from apple_mail_fast_mcp.junk_providers import (
     GmailPurger,
+    ImapPurger,
     MicrosoftPurger,
     PermanentDeleteError,
     run_command,
@@ -123,3 +124,21 @@ def test_junk_regression_microsoft_health_check_uses_named_connection(tmp_path: 
     assert select_call[0][select_call[0].index("--name") + 1] == "personal"
     assert profile_call[0][3].endswith("?$select=userPrincipalName,mail")
     assert restore_call[0][restore_call[0].index("--name") + 1] == "work"
+
+
+def test_junk_regression_standard_imap_deletes_exact_junk_message() -> None:
+    """Regression: a non-Google IMAP Junk folder must use scoped permanent deletion."""
+    connector = MagicMock()
+    connector.permanently_delete_imap_message.return_value = 1
+    purger = ImapPurger(
+        account="mail@example.com",
+        mailbox="Junk Mail",
+        connector=connector,
+    )
+
+    assert purger.permanently_delete("rfc@example.test") == 1
+    connector.permanently_delete_imap_message.assert_called_once_with(
+        account="mail@example.com",
+        mailbox="Junk Mail",
+        rfc_message_id="rfc@example.test",
+    )

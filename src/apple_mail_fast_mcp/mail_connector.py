@@ -1965,6 +1965,33 @@ class AppleMailConnector:
             text_contains=text_contains,
         )
 
+    def check_imap_health(self, account: str, mailbox: str) -> None:
+        """Prove direct IMAP access for one account and mailbox without fallback."""
+        host, port, email = self._resolve_imap_config(account)
+        password = self._get_imap_password_with_fallback(account, email)
+        ImapConnector(host, port, email, password, pool=self._imap_pool).search_messages(
+            mailbox=mailbox,
+            limit=1,
+        )
+
+    def permanently_delete_imap_message(
+        self,
+        *,
+        account: str,
+        mailbox: str,
+        rfc_message_id: str,
+    ) -> int:
+        """Permanently delete one exact Junk message through scoped IMAP UID EXPUNGE."""
+        host, port, email = self._resolve_imap_config(account)
+        password = self._get_imap_password_with_fallback(account, email)
+        return ImapConnector(
+            host,
+            port,
+            email,
+            password,
+            pool=self._imap_pool,
+        ).permanently_delete_messages([rfc_message_id], mailbox)
+
     def search_messages(
         self,
         account: str,

@@ -15,7 +15,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from .junk_health import DiscordWebhookNotifier
-from .junk_providers import GmailPurger, PermanentDeleteError, ProviderAccount, build_purger
+from .junk_providers import (
+    GmailPurger,
+    ImapPurger,
+    PermanentDeleteError,
+    ProviderAccount,
+    build_purger,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -205,8 +211,11 @@ def _verify_provider(*, account: str, provider: ProviderAccount, source_home: Pa
     purger = build_purger(provider, email_account=account, source_home=source_home)
     if isinstance(purger, GmailPurger):
         purger.check_health()
-    else:
-        purger.check_health(expected_email=account)
+        return
+    if isinstance(purger, ImapPurger):
+        purger.check_health()
+        return
+    purger.check_health(expected_email=account)
 
 
 def _run_microsoft_recovery(

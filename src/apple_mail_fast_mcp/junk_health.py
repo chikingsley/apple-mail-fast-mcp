@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 
 from .junk_providers import (
     GmailPurger,
+    ImapPurger,
     PermanentDeleteError,
     ProviderAccount,
     build_purger,
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .junk_campaigns import JunkCampaignStore
+    from .mail_connector import AppleMailConnector
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +83,25 @@ class DiscordWebhookNotifier:
                 raise RuntimeError(f"Discord webhook returned HTTP {response.status}")
 
 
-def _check_account(*, account: str, provider: ProviderAccount, source_home: Path) -> None:
-    purger = build_purger(provider, email_account=account, source_home=source_home)
+def _check_account(
+    *,
+    account: str,
+    provider: ProviderAccount,
+    source_home: Path,
+    connector: AppleMailConnector,
+    mailbox: str | None,
+) -> None:
+    purger = build_purger(
+        provider,
+        email_account=account,
+        source_home=source_home,
+        source_mailbox=mailbox,
+        connector=connector,
+    )
     if isinstance(purger, GmailPurger):
+        purger.check_health()
+        return
+    if isinstance(purger, ImapPurger):
         purger.check_health()
         return
     purger.check_health(expected_email=account)
@@ -94,6 +112,8 @@ def check_provider_health(
     providers: Mapping[str, ProviderAccount],
     store: JunkCampaignStore,
     source_home: Path,
+    connector: AppleMailConnector,
+    mailboxes: Mapping[str, str],
     notifier: HealthNotifier | None = None,
 ) -> list[dict[str, object]]:
     """Check every provider and notify only when its recorded state changes."""
@@ -103,7 +123,13 @@ def check_provider_health(
     for account, provider in sorted(providers.items()):
         detail = ""
         try:
-            _check_account(account=account, provider=provider, source_home=source_home)
+            _check_account(
+                account=account,
+                provider=provider,
+                source_home=source_home,
+                connector=connector,
+                mailbox=mailboxes.get(account),
+            )
             healthy = True
         except (OSError, PermanentDeleteError, ValueError) as exc:
             healthy = False
