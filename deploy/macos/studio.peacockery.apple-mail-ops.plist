@@ -24,6 +24,8 @@
     <string>__MAIL_OPS_CONFIG__</string>
     <key>APPLE_MAIL_MCP_OPS_STATUS</key>
     <string>__MAIL_OPS_STATUS__</string>
+    <key>APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_SIMON_PEACOCKERY_STUDIO</key>
+    <string>__APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_SIMON_PEACOCKERY_STUDIO__</string>
     <key>PATH</key>
     <string>__HOME__/.config/apple-mail-fast-mcp/bin:__HOME__/.local/bin:__HOME__/.opencode/bin:__HOME__/.kimi-code/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>

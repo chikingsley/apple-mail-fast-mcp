@@ -19,6 +19,7 @@ readonly STATE_DIR="${HOME}/.local/state/apple-mail-fast-mcp"
 readonly TARGET_STATUS="${STATE_DIR}/ops-status.json"
 readonly LOG_DIR="${HOME}/Library/Logs/apple-mail-fast-mcp"
 readonly APPLESCRIPT_HELPER_SOCKET="${CONFIG_DIR}/applescript-helper.sock"
+readonly PEACOCKERY_IMAP_PASSWORD_FILE="${CONFIG_DIR}/imap-password-peacockery"
 readonly GUI_DOMAIN="gui/$(id -u)"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -31,6 +32,10 @@ command -v launchctl >/dev/null
 
 if [[ ! -S "${APPLESCRIPT_HELPER_SOCKET}" || -L "${APPLESCRIPT_HELPER_SOCKET}" ]]; then
   echo "AppleScript helper socket is unavailable: ${APPLESCRIPT_HELPER_SOCKET}" >&2
+  exit 1
+fi
+if [[ ! -f "${PEACOCKERY_IMAP_PASSWORD_FILE}" || -L "${PEACOCKERY_IMAP_PASSWORD_FILE}" ]]; then
+  echo "Peacockery IMAP password file is unavailable: ${PEACOCKERY_IMAP_PASSWORD_FILE}" >&2
   exit 1
 fi
 
@@ -52,6 +57,9 @@ install -m 600 "${SOURCE_PLIST}" "${TARGET_PLIST}"
   "${TARGET_PLIST}"
 /usr/libexec/PlistBuddy -c \
   "Set :EnvironmentVariables:APPLE_MAIL_MCP_OPS_STATUS ${TARGET_STATUS}" \
+  "${TARGET_PLIST}"
+/usr/libexec/PlistBuddy -c \
+  "Set :EnvironmentVariables:APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_SIMON_PEACOCKERY_STUDIO ${PEACOCKERY_IMAP_PASSWORD_FILE}" \
   "${TARGET_PLIST}"
 /usr/libexec/PlistBuddy -c \
   "Set :EnvironmentVariables:PATH ${BIN_DIR}:${HOME}/.local/bin:${HOME}/.opencode/bin:${HOME}/.kimi-code/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
