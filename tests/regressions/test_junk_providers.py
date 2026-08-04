@@ -93,6 +93,7 @@ def test_junk_regression_microsoft_restores_active_named_connection(tmp_path: Pa
     )
     purger = MicrosoftPurger(
         connection_name="personal",
+        expected_email="mail@outlook.com",
         m365_path="/usr/bin/m365",
         source_home=tmp_path,
         runner=runner,
@@ -118,6 +119,7 @@ def test_junk_regression_microsoft_health_check_uses_named_connection(tmp_path: 
     runner = RecordingRunner([json.dumps(connections), "", json.dumps(profile), ""])
     purger = MicrosoftPurger(
         connection_name="personal",
+        expected_email="mail@outlook.com",
         m365_path="/usr/bin/m365",
         source_home=tmp_path,
         runner=runner,
@@ -138,6 +140,7 @@ def test_junk_regression_disconnected_microsoft_identity_fails_before_graph(tmp_
     )
     purger = MicrosoftPurger(
         connection_name="personal",
+        expected_email="mail@outlook.com",
         m365_path="/usr/bin/m365",
         source_home=tmp_path,
         runner=runner,
@@ -147,6 +150,66 @@ def test_junk_regression_disconnected_microsoft_identity_fails_before_graph(tmp_
         purger.check_health(expected_email="mail@outlook.com")
 
     assert len(runner.calls) == 1
+
+
+def test_junk_regression_personal_microsoft_identity_is_repaired_from_msal(
+    tmp_path: Path,
+) -> None:
+    """Regression: an opaque personal token must not trigger another device-code login."""
+    connection = {
+        "name": "personal",
+        "connectedAs": "",
+        "identityId": "",
+        "identityName": "",
+        "identityTenantId": "",
+        "active": True,
+        "accessTokens": {"https://graph.microsoft.com": {}},
+        "appId": "app-id",
+        "authType": "deviceCode",
+        "cloudType": "Public",
+        "tenant": "common",
+    }
+    (tmp_path / ".cli-m365-all-connections.json").write_text(
+        json.dumps([connection, connection]), encoding="utf-8"
+    )
+    (tmp_path / ".cli-m365-connection.json").write_text(json.dumps(connection), encoding="utf-8")
+    (tmp_path / ".cli-m365-msal.json").write_text(
+        json.dumps(
+            {
+                "Account": {
+                    "personal": {
+                        "username": "mail@outlook.com",
+                        "local_account_id": "personal-id",
+                        "realm": "personal-tenant",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    repaired_inventory = [{"name": "personal", "connectedAs": "mail@outlook.com", "active": True}]
+    profile = {"userPrincipalName": "mail@outlook.com", "mail": "mail@outlook.com"}
+    runner = RecordingRunner(
+        [
+            json.dumps([{"name": "personal", "connectedAs": "", "active": True}]),
+            json.dumps(repaired_inventory),
+            json.dumps(profile),
+        ]
+    )
+    purger = MicrosoftPurger(
+        connection_name="personal",
+        expected_email="mail@outlook.com",
+        m365_path="/usr/bin/m365",
+        source_home=tmp_path,
+        runner=runner,
+    )
+
+    purger.check_health(expected_email="mail@outlook.com")
+
+    stored = json.loads((tmp_path / ".cli-m365-all-connections.json").read_text())
+    assert len(stored) == 1
+    assert stored[0]["identityName"] == "mail@outlook.com"
+    assert stored[0]["identityId"] == "personal-id"
 
 
 def test_junk_regression_standard_imap_deletes_exact_junk_message() -> None:

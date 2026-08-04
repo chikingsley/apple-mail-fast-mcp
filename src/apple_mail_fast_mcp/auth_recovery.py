@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from .junk_health import DiscordWebhookNotifier
+from .junk_health import DiscordMessageReceipt, DiscordWebhookNotifier
 from .junk_providers import (
     GmailPurger,
     ImapPurger,
@@ -196,8 +196,8 @@ class AuthenticationRecoveryDispatcher:
 
 def _notify_device_code(
     notifier: DiscordWebhookNotifier, *, account: str, recovery_id: str, url: str, code: str
-) -> None:
-    notifier.send_text(
+) -> tuple[DiscordMessageReceipt, DiscordMessageReceipt]:
+    context_receipt = notifier.send_text(
         "APPLE MAIL AUTHORIZATION\n\n"
         "Recovery: mail-auth-recovery\n"
         f"Incident: {recovery_id}\n"
@@ -205,7 +205,8 @@ def _notify_device_code(
         f"Open: {url}\n"
         "Copy the code from the next Discord message."
     )
-    notifier.send_text(code)
+    code_receipt = notifier.send_text(code)
+    return context_receipt, code_receipt
 
 
 def _verify_provider(*, account: str, provider: ProviderAccount, source_home: Path) -> None:
@@ -219,6 +220,16 @@ def _verify_provider(*, account: str, provider: ProviderAccount, source_home: Pa
     purger.check_health(expected_email=account)
 
 
+def _microsoft_connection_is_healthy(
+    *, account: str, provider: ProviderAccount, source_home: Path
+) -> bool:
+    try:
+        _verify_provider(account=account, provider=provider, source_home=source_home)
+    except PermanentDeleteError:
+        return False
+    return True
+
+
 def _run_microsoft_recovery(
     *,
     account: str,
@@ -226,11 +237,16 @@ def _run_microsoft_recovery(
     recovery_id: str,
     state_path: Path,
     notifier: DiscordWebhookNotifier,
+    source_home: Path,
     timeout_seconds: int,
-) -> None:
+) -> list[dict[str, str | None]]:
     m365 = shutil.which("m365")
     if m365 is None:
         raise FileNotFoundError("m365 is unavailable")
+    if _microsoft_connection_is_healthy(
+        account=account, provider=provider, source_home=source_home
+    ):
+        return []
     inventory = subprocess.run(
         [m365, "connection", "list", "--output", "json"],
         capture_output=True,
@@ -277,6 +293,7 @@ def _run_microsoft_recovery(
         text=True,
     )
     output: list[str] = []
+    notification_receipts: list[dict[str, str | None]] = []
     notified = False
     stdout = process.stdout
     if stdout is None:
@@ -284,17 +301,18 @@ def _run_microsoft_recovery(
         raise RuntimeError("Microsoft login output stream is unavailable")
 
     def record_line(line: str) -> None:
-        nonlocal notified
+        nonlocal notification_receipts, notified
         output.append(line)
         match = DEVICE_CODE_PATTERN.search(line)
         if match is not None and not notified:
-            _notify_device_code(
+            receipts = _notify_device_code(
                 notifier,
                 account=account,
                 recovery_id=recovery_id,
                 url=match.group("url"),
                 code=match.group("code").upper(),
             )
+            notification_receipts = [receipt.as_dict() for receipt in receipts]
             _write_json(
                 state_path,
                 {
@@ -304,6 +322,7 @@ def _run_microsoft_recovery(
                     "credential": provider.credential,
                     "state": "waiting_for_approval",
                     "pid": os.getpid(),
+                    "notification_receipts": notification_receipts,
                     "updated_at": datetime.now(UTC).isoformat(),
                 },
             )
@@ -326,6 +345,7 @@ def _run_microsoft_recovery(
         raise RuntimeError(detail[-500:])
     if not notified:
         raise RuntimeError("Microsoft login completed without a device code")
+    return notification_receipts
 
 
 def _run_google_recovery(
@@ -409,15 +429,21 @@ def run_authentication_recovery(
     notifier = DiscordWebhookNotifier(webhook_file)
     try:
         if provider.kind == "microsoft":
-            _run_microsoft_recovery(
+            notification_receipts = _run_microsoft_recovery(
                 account=account,
                 provider=provider,
                 recovery_id=recovery_id,
                 state_path=state_path,
                 notifier=notifier,
+                source_home=source_home,
                 timeout_seconds=timeout_seconds,
             )
             _verify_provider(account=account, provider=provider, source_home=source_home)
+            recovered_receipt = notifier.send_text(
+                f"APPLE MAIL RECOVERED\n\nAccount: {account}\nAuthentication: healthy\n"
+                f"Incident: {recovery_id}"
+            )
+            notification_receipts.append(recovered_receipt.as_dict())
             _write_json(
                 state_path,
                 {
@@ -426,12 +452,9 @@ def run_authentication_recovery(
                     "provider": provider.kind,
                     "credential": provider.credential,
                     "state": "recovered",
+                    "notification_receipts": notification_receipts,
                     "updated_at": datetime.now(UTC).isoformat(),
                 },
-            )
-            notifier.send_text(
-                f"APPLE MAIL RECOVERED\n\nAccount: {account}\nAuthentication: healthy\n"
-                f"Incident: {recovery_id}"
             )
             return 0
         _run_google_recovery(
@@ -443,19 +466,30 @@ def run_authentication_recovery(
             source_home=source_home,
         )
         return 0
-    except (OSError, PermanentDeleteError, RuntimeError, TimeoutError, ValueError) as exc:
-        _write_json(
-            state_path,
-            {
-                "id": recovery_id,
-                "account": account,
-                "provider": provider.kind,
-                "credential": provider.credential,
-                "state": "failed",
-                "detail": str(exc)[:500],
-                "updated_at": datetime.now(UTC).isoformat(),
-            },
-        )
+    except (
+        OSError,
+        PermanentDeleteError,
+        RuntimeError,
+        TimeoutError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        failed_state: dict[str, object] = {
+            "id": recovery_id,
+            "account": account,
+            "provider": provider.kind,
+            "credential": provider.credential,
+            "state": "failed",
+            "detail": str(exc)[:500],
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+        if state_path.exists():
+            previous = json.loads(state_path.read_text(encoding="utf-8"))
+            if isinstance(previous, dict) and isinstance(
+                previous.get("notification_receipts"), list
+            ):
+                failed_state["notification_receipts"] = previous["notification_receipts"]
+        _write_json(state_path, failed_state)
         notifier.send_text(
             f"APPLE MAIL RECOVERY FAILED\n\nAccount: {account}\nIncident: {recovery_id}\n"
             f"Detail: {str(exc)[:500]}"

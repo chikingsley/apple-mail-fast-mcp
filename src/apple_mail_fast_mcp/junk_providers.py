@@ -179,14 +179,118 @@ class MicrosoftPurger:
         self,
         *,
         connection_name: str,
+        expected_email: str,
         m365_path: str,
         source_home: Path,
         runner: CommandRunner = run_command,
     ) -> None:
         self.connection_name = connection_name
+        self.expected_email = expected_email
         self.m365_path = m365_path
         self.source_home = source_home
         self.runner = runner
+
+    @staticmethod
+    def _write_connection_json(path: Path, value: object) -> None:
+        temporary = path.with_name(f".{path.name}.repair")
+        temporary.write_text(json.dumps(value, separators=(",", ":")) + "\n", encoding="utf-8")
+        temporary.chmod(0o600)
+        temporary.replace(path)
+
+    def _repair_connection_metadata(self) -> bool:
+        """Restore a personal-account identity that m365 erases after token refresh."""
+        all_path = self.source_home / ".cli-m365-all-connections.json"
+        current_path = self.source_home / ".cli-m365-connection.json"
+        cache_path = self.source_home / ".cli-m365-msal.json"
+        if not all(path.exists() for path in (all_path, current_path, cache_path)):
+            return False
+        try:
+            connections = json.loads(all_path.read_text(encoding="utf-8"))
+            current = json.loads(current_path.read_text(encoding="utf-8"))
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            raise PermanentDeleteError("Microsoft connection storage is invalid") from exc
+        if not isinstance(connections, list) or not isinstance(current, dict):
+            raise PermanentDeleteError("Microsoft connection storage is invalid")
+        accounts = cache.get("Account") if isinstance(cache, dict) else None
+        if not isinstance(accounts, dict):
+            raise PermanentDeleteError("Microsoft token cache is invalid")
+        account = next(
+            (
+                value
+                for value in accounts.values()
+                if isinstance(value, dict)
+                and isinstance(value.get("username"), str)
+                and value["username"].lower() == self.expected_email.lower()
+            ),
+            None,
+        )
+        if account is None:
+            return False
+        identity_id = account.get("local_account_id")
+        tenant_id = account.get("realm")
+        if not isinstance(identity_id, str) or not isinstance(tenant_id, str):
+            raise PermanentDeleteError("Microsoft token cache account is invalid")
+
+        named = [
+            value
+            for value in connections
+            if isinstance(value, dict) and value.get("name") == self.connection_name
+        ]
+        current_is_target = current.get("name") == self.connection_name
+        template = (
+            current
+            if current_is_target
+            else next(
+                (
+                    value
+                    for value in named
+                    if isinstance((identity_name := value.get("identityName")), str)
+                    and identity_name.lower() == self.expected_email.lower()
+                ),
+                named[0] if named else None,
+            )
+        )
+        cloned_other_connection = template is None
+        if template is None:
+            template = next((value for value in connections if isinstance(value, dict)), None)
+        if template is None:
+            return False
+        active = current_is_target or any(value.get("active") is True for value in named)
+        repaired = {
+            **template,
+            "name": self.connection_name,
+            "active": active,
+            "identityId": identity_id,
+            "identityName": self.expected_email,
+            "identityTenantId": tenant_id,
+        }
+        if cloned_other_connection:
+            repaired["accessTokens"] = {}
+        others = [
+            value
+            for value in connections
+            if isinstance(value, dict) and value.get("name") != self.connection_name
+        ]
+        if active:
+            others = [{**value, "active": False} for value in others]
+            updated = [repaired, *others]
+        else:
+            updated = [*others, repaired]
+        self._write_connection_json(all_path, updated)
+        if current_is_target:
+            self._write_connection_json(current_path, repaired)
+        return True
+
+    def _connection_inventory(self) -> list[dict[str, Any]]:
+        raw = self.runner((self.m365_path, "connection", "list", "--output", "json"))
+        try:
+            connections = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise PermanentDeleteError("Microsoft 365 connection inventory is invalid") from exc
+        if not isinstance(connections, list):
+            raise PermanentDeleteError("Microsoft 365 connection inventory is invalid")
+        return [row for row in connections if isinstance(row, dict)]
 
     @contextmanager
     def _selected_connection(self) -> Iterator[Mapping[str, str]]:
@@ -195,21 +299,24 @@ class MicrosoftPurger:
         with lock_path.open("a+", encoding="utf-8") as lock_file:
             lock_path.chmod(0o600)
             fcntl.flock(lock_file, fcntl.LOCK_EX)
-            raw = self.runner((self.m365_path, "connection", "list", "--output", "json"))
-            try:
-                connections = json.loads(raw)
-            except json.JSONDecodeError as exc:
-                raise PermanentDeleteError("Microsoft 365 connection inventory is invalid") from exc
-            if not isinstance(connections, list):
-                raise PermanentDeleteError("Microsoft 365 connection inventory is invalid")
-            target = next(
-                (
+            connections = self._connection_inventory()
+            targets = [row for row in connections if row.get("name") == self.connection_name]
+            exact_targets = [
+                row
+                for row in targets
+                if isinstance(row.get("connectedAs"), str)
+                and row["connectedAs"].lower() == self.expected_email.lower()
+            ]
+            if (len(targets) != 1 or not exact_targets) and self._repair_connection_metadata():
+                connections = self._connection_inventory()
+                targets = [row for row in connections if row.get("name") == self.connection_name]
+                exact_targets = [
                     row
-                    for row in connections
-                    if isinstance(row, dict) and row.get("name") == self.connection_name
-                ),
-                None,
-            )
+                    for row in targets
+                    if isinstance(row.get("connectedAs"), str)
+                    and row["connectedAs"].lower() == self.expected_email.lower()
+                ]
+            target = exact_targets[0] if len(targets) == 1 and exact_targets else None
             active_names = [
                 row.get("name")
                 for row in connections
@@ -217,6 +324,10 @@ class MicrosoftPurger:
             ]
             original = active_names[0] if active_names else None
             if target is None:
+                if targets:
+                    raise PermanentDeleteError(
+                        f"Microsoft authentication required for connection: {self.connection_name}"
+                    )
                 raise PermanentDeleteError(
                     f"Microsoft 365 connection is missing: {self.connection_name}"
                 )
@@ -233,6 +344,7 @@ class MicrosoftPurger:
             finally:
                 if changed and isinstance(original, str):
                     self._select_connection(original)
+                self._repair_connection_metadata()
                 fcntl.flock(lock_file, fcntl.LOCK_UN)
 
     def _select_connection(self, name: str) -> None:
@@ -260,7 +372,7 @@ class MicrosoftPurger:
             }
         )
         list_url = "https://graph.microsoft.com/v1.0/me/mailFolders/junkemail/messages?" + query
-        raw = self.runner(
+        raw = self._request(
             (self.m365_path, "request", "--url", list_url, "--output", "json"),
             environment=environment,
         )
@@ -271,6 +383,12 @@ class MicrosoftPurger:
             raise PermanentDeleteError("Microsoft Graph could not resolve the message in Junk")
         return valid_ids
 
+    def _request(self, arguments: Sequence[str], *, environment: Mapping[str, str]) -> str:
+        try:
+            return self.runner(arguments, environment=environment)
+        finally:
+            self._repair_connection_metadata()
+
     def resolve_message_ids(self, rfc_message_id: str) -> list[str]:
         """Resolve a current Junk message and restore the prior active connection."""
         with self._selected_connection() as environment:
@@ -280,7 +398,7 @@ class MicrosoftPurger:
         """Prove that a named Microsoft connection can read the expected profile."""
         profile_url = "https://graph.microsoft.com/v1.0/me?$select=userPrincipalName,mail"
         with self._selected_connection() as environment:
-            raw = self.runner(
+            raw = self._request(
                 (self.m365_path, "request", "--url", profile_url, "--output", "json"),
                 environment=environment,
             )
@@ -300,7 +418,7 @@ class MicrosoftPurger:
         with self._selected_connection() as environment:
             valid_ids = self._resolve_message_ids(rfc_message_id, environment=environment)
             for message_id in valid_ids:
-                self.runner(
+                self._request(
                     (
                         self.m365_path,
                         "request",
@@ -372,6 +490,7 @@ def build_purger(
             raise PermanentDeleteError("m365 is unavailable on this host")
         return MicrosoftPurger(
             connection_name=account.credential,
+            expected_email=email_account,
             m365_path=m365_path,
             source_home=source_home,
             runner=runner,

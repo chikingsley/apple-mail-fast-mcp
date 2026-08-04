@@ -7,7 +7,7 @@ import logging
 import stat
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from .junk_providers import (
@@ -32,6 +32,22 @@ class HealthNotifier(Protocol):
     """Delivery boundary for provider-health state transitions."""
 
     def notify(self, *, failed: Sequence[str], recovered: Sequence[str]) -> None: ...
+
+
+@dataclass(frozen=True)
+class DiscordMessageReceipt:
+    """Safe identifiers proving that Discord created one webhook message."""
+
+    message_id: str
+    channel_id: str
+    guild_id: str | None
+
+    def as_dict(self) -> dict[str, str | None]:
+        return {
+            "message_id": self.message_id,
+            "channel_id": self.channel_id,
+            "guild_id": self.guild_id,
+        }
 
 
 @dataclass(frozen=True)
@@ -68,19 +84,41 @@ class DiscordWebhookNotifier:
             lines.append(f"Apple Mail provider access recovered: {accounts}.")
         self.send_text("\n".join(lines))
 
-    def send_text(self, content: str) -> None:
-        """Deliver one bounded plain-text operational message."""
+    def send_text(self, content: str) -> DiscordMessageReceipt:
+        """Deliver one bounded message and return Discord's creation receipt."""
         if not content.strip() or len(content) > 1800:
             raise ValueError("Discord operational message must contain 1 to 1800 characters")
+        parsed = urlparse(self._webhook_url())
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        query["wait"] = "true"
+        delivery_url = urlunparse(parsed._replace(query=urlencode(query)))
         request = Request(  # ruff: ignore[suspicious-url-open-usage] -- validated HTTPS
-            self._webhook_url(),
+            delivery_url,
             data=json.dumps({"content": content}).encode(),
             headers={"Content-Type": "application/json", "User-Agent": "apple-mail-fast-mcp"},
             method="POST",
         )
         with urlopen(request, timeout=10) as response:  # ruff: ignore[suspicious-url-open-usage]
-            if response.status not in {200, 204}:
+            if response.status != 200:
                 raise RuntimeError(f"Discord webhook returned HTTP {response.status}")
+            try:
+                receipt = json.loads(response.read())
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise RuntimeError("Discord webhook returned an invalid message receipt") from exc
+        if not isinstance(receipt, dict):
+            raise TypeError("Discord webhook returned an invalid message receipt")
+        message_id = receipt.get("id")
+        channel_id = receipt.get("channel_id")
+        guild_id = receipt.get("guild_id")
+        if not isinstance(message_id, str) or not isinstance(channel_id, str):
+            raise TypeError("Discord webhook returned an incomplete message receipt")
+        if guild_id is not None and not isinstance(guild_id, str):
+            raise RuntimeError("Discord webhook returned an invalid message receipt")
+        return DiscordMessageReceipt(
+            message_id=message_id,
+            channel_id=channel_id,
+            guild_id=guild_id,
+        )
 
 
 def _check_account(
@@ -153,6 +191,6 @@ def check_provider_health(
     if notifier is not None and (failed_transitions or recovered_transitions):
         try:
             notifier.notify(failed=failed_transitions, recovered=recovered_transitions)
-        except (OSError, RuntimeError, ValueError) as exc:
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
             logger.error("Provider health notification failed: %s", exc)
     return results
