@@ -163,15 +163,22 @@ def support_files(token: str) -> dict[str, tuple[bytes, int]]:
             }
         }
     }
-    wrapper = f"""#!/bin/sh
-set -eu
-exec uvx --from fastmcp=={FASTMCP_VERSION} fastmcp run \\
-  "$HOME/.config/apple-mail-fast-mcp/proxy.json" --transport stdio --no-banner
+    wrapper = f"""#!/usr/bin/env python3
+import os
+from pathlib import Path
+
+os.execvp("uvx", [
+    "uvx", "--from", "fastmcp=={FASTMCP_VERSION}", "fastmcp", "run",
+    str(Path.home() / ".config/apple-mail-fast-mcp/proxy.json"),
+    "--transport", "stdio", "--no-banner",
+])
 """
-    header_helper = """#!/bin/sh
-set -eu
-authorization=$(cat "$HOME/.config/apple-mail-fast-mcp/mcp-authorization")
-printf '{"Authorization":"%s"}\\n' "$authorization"
+    header_helper = """#!/usr/bin/env python3
+import json
+from pathlib import Path
+
+authorization = (Path.home() / ".config/apple-mail-fast-mcp/mcp-authorization").read_text().strip()
+print(json.dumps({"Authorization": authorization}))
 """
     return {
         ".config/apple-mail-fast-mcp/mcp-token": (f"{token}\n".encode(), 0o600),

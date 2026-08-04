@@ -21,6 +21,7 @@ from .junk_providers import (
     PermanentDeleteError,
     ProviderAccount,
     build_purger,
+    gog_environment,
 )
 
 if TYPE_CHECKING:
@@ -334,6 +335,7 @@ def _run_google_recovery(
     recovery_id: str,
     state_path: Path,
     notifier: DiscordWebhookNotifier,
+    source_home: Path,
 ) -> None:
     gog = shutil.which("gog")
     if gog is None:
@@ -355,6 +357,7 @@ def _run_google_recovery(
         ],
         capture_output=True,
         check=False,
+        env=gog_environment(source_home),
         text=True,
         timeout=30,
     )
@@ -437,6 +440,7 @@ def run_authentication_recovery(
             recovery_id=recovery_id,
             state_path=state_path,
             notifier=notifier,
+            source_home=source_home,
         )
         return 0
     except (OSError, PermanentDeleteError, RuntimeError, TimeoutError, ValueError) as exc:

@@ -161,8 +161,6 @@ def _eligible_messages(
     store: JunkCampaignStore,
     messages: Sequence[JunkMessage],
     config: JunkCleanerConfig,
-    *,
-    flagged_connector_ids: set[str],
 ) -> list[JunkMessage]:
     if not messages:
         return []
@@ -172,11 +170,12 @@ def _eligible_messages(
         minimum_messages=config.minimum_messages,
         observation_window_days=config.observation_window_days,
     )
+    auto_delete_domains = store.auto_delete_domains()
     return [
         message
         for message in messages
         if (
-            message.connector_id in flagged_connector_ids
+            message.fingerprint.domain in auto_delete_domains
             or message.fingerprint.local_part in local_parts
         )
         and not store.was_deleted(message)
@@ -245,7 +244,7 @@ def clean_junk(
         else None
     )
     results: list[dict[str, object]] = []
-    inventories: list[tuple[dict[str, object], JunkMailbox, list[JunkMessage], set[str]]] = []
+    inventories: list[tuple[dict[str, object], JunkMailbox, list[JunkMessage]]] = []
     discovered_mailboxes = junk_mailboxes(connector)
     for junk_mailbox in discovered_mailboxes:
         account = junk_mailbox.provider_account
@@ -264,7 +263,6 @@ def clean_junk(
                 account=junk_mailbox.connector_account, mailbox=mailbox, limit=500
             )
             evidence = store.record_messages(account=account, mailbox=mailbox, messages=rows)
-            flagged_connector_ids = store.flagged_message_ids(account=account, mailbox=mailbox)
             result["messages_seen"] = len(rows)
             result["evidence_recorded"] = len(evidence)
             result["flags_cleared"] = clear_junk_flags(
@@ -275,7 +273,7 @@ def clean_junk(
         except MailMessageNotFoundError:
             result["sync_retry"] = True
             continue
-        inventories.append((result, junk_mailbox, evidence, flagged_connector_ids))
+        inventories.append((result, junk_mailbox, evidence))
 
     provider_health = check_provider_health(
         providers=config.providers,
@@ -298,13 +296,12 @@ def clean_junk(
         recovery_dispatch_error = str(exc)[:500]
     health_by_account = {str(row["account"]): row.get("healthy") is True for row in provider_health}
     deletions_remaining = config.maximum_deletions_per_run
-    for result, junk_mailbox, evidence, flagged_connector_ids in inventories:
+    for result, junk_mailbox, evidence in inventories:
         account = junk_mailbox.provider_account
         candidates = _eligible_messages(
             store,
             evidence,
             config,
-            flagged_connector_ids=flagged_connector_ids,
         )
         result["qualified"] = len(candidates)
         provider = config.providers.get(account)

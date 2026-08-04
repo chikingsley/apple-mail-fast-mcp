@@ -15,7 +15,8 @@ It streams `git archive` over SSH into `~/.local/share/peacockery/apple-mail/rel
 For direct development or recovery from a repository checkout on the Mac:
 
 ```bash
-./scripts/install-macos-launch-agent.sh
+uv run apple-mail-install service
+uv run apple-mail-install ops
 ```
 
 The installer creates or reuses a machine-local code-signing identity, builds and signs `~/Applications/Apple Mail MCP Helper.app`, loads the helper and MCP server as resident per-user LaunchAgents, and loads `studio.peacockery.apple-mail-ops` as one scheduled supervisor. The supervisor exits between five-minute runs. Its internal capture/unflag stage always precedes isolated provider-health, incident-recovery, and permanent-deletion stages. The MCP service enables the IMAP connection pool, masks internal FastMCP errors, disables startup update checks, and writes logs to `~/Library/Logs/apple-mail-fast-mcp/`.
@@ -38,14 +39,14 @@ The installer automatically creates or reuses a valid ten-year local identity na
 To create or repair the identity without reinstalling the service, run:
 
 ```bash
-./scripts/create-macos-signing-identity.sh
+uv run apple-mail-install signing-identity
 ```
 
 To use an Apple-issued identity instead, set its exact name before running the installer:
 
 ```bash
 export APPLE_MAIL_MCP_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)"
-./scripts/install-macos-launch-agent.sh
+uv run apple-mail-install service
 ```
 
 The practical certificate choices are:
@@ -56,7 +57,7 @@ The practical certificate choices are:
 
 Every certificate-backed option stores the certificate and its private key in Keychain; the environment variable supplies only the identity name. Switching from an ad-hoc identity to a certificate-backed identity can require one new Automation grant, after which rebuilds signed by that identity retain the same designated requirement.
 
-To skip local identity creation and force an ad-hoc signature, run `APPLE_MAIL_MCP_CODESIGN_IDENTITY=- ./scripts/install-macos-launch-agent.sh`.
+To select ad-hoc signing explicitly, run `APPLE_MAIL_MCP_CODESIGN_IDENTITY=- uv run apple-mail-install service`.
 
 On first install it generates a 256-bit bearer token at `~/.config/apple-mail-fast-mcp/http-bearer-token`. The file is never printed and must remain owned by the current user with mode `0600` (read-only mode `0400` is also accepted). Later installs reuse the same token.
 
@@ -153,6 +154,6 @@ tail -n 100 ~/Library/Logs/apple-mail-fast-mcp/helper.err.log
 tail -n 100 ~/Library/Logs/apple-mail-fast-mcp/mail-ops.err.log
 ```
 
-The status command reports the immutable release, all three Apple Mail components, the latest complete supervisor result, account-scoped authentication recoveries, and all other user LaunchAgents discovered on the Mac. The supervisor discovers every enabled Junk, Junk Email, Junk Mail, and Spam folder. Gmail and Microsoft deletion uses provider APIs, while standard IMAP deletion requires UIDPLUS and uses scoped UID EXPUNGE. Provider authentication failures generate a transition-only Discord alert and one stable deterministic recovery per account and provider credential. Microsoft recovery runs the provider CLI directly and sends two Discord messages: account context first, then the device code as its own copyable message. Google recovery starts the provider CLI's remote OAuth flow and records the account-specific redirect handoff state. Recovery state remains separate from the junk-campaign evidence and deletion-action ledger.
+The status command reports the immutable release, all three Apple Mail components, the latest complete supervisor result, account-scoped authentication recoveries, and all other user LaunchAgents discovered on the Mac. The supervisor discovers every enabled Junk, Junk Email, Junk Mail, and Spam folder. Its SQLite database retains every usable junk observation, deletion action, provider-health result, and sender domain learned from an auto-flagged junk message. Learned domains apply globally across configured accounts and remain active indefinitely; later messages from those domains qualify when they reach a scanned junk folder. Gmail and Microsoft deletion uses provider APIs, while standard IMAP deletion requires UIDPLUS and uses scoped UID EXPUNGE. Provider authentication failures generate a transition-only Discord alert and one stable deterministic recovery per account and provider credential. Microsoft recovery runs the provider CLI directly and sends two Discord messages: account context first, then the device code as its own copyable message. Google recovery starts the provider CLI's remote OAuth flow and records the account-specific redirect handoff state. Recovery state remains separate from the junk-campaign evidence and deletion-action ledger.
 
-After pushing a fleet update to `main`, run `uv run apple-mail-fleet` on GMK. The command rebuilds the native helper, performs a locked sync, refreshes the configured harnesses and skill copies, then verifies the service. Direct Mac development uses `./scripts/install-macos-launch-agent.sh`.
+After pushing a fleet update to `main`, run `uv run apple-mail-fleet` on GMK. The command rebuilds the native helper, performs a locked sync, refreshes the configured harnesses and skill copies, then verifies the service. Direct Mac development uses `uv run apple-mail-install service` followed by `uv run apple-mail-install ops`.

@@ -71,8 +71,8 @@ def test_junk_regression_action_ledger_only_suppresses_completed_deletes(tmp_pat
     assert store.was_deleted(message) is True
 
 
-def test_junk_regression_flagged_eligibility_survives_local_unflag(tmp_path: Path) -> None:
-    """Regression: clearing a visible flag must preserve queued provider deletion evidence."""
+def test_junk_regression_flagged_domain_survives_local_unflag(tmp_path: Path) -> None:
+    """Regression: clearing a flag must preserve its domain-level deletion rule."""
     store = JunkCampaignStore(tmp_path / "junk.sqlite3")
     flagged = _message("flagged-1", "ordinary@campaign.example")
     flagged["flagged"] = True
@@ -81,9 +81,20 @@ def test_junk_regression_flagged_eligibility_survives_local_unflag(tmp_path: Pat
     unflagged = {**flagged, "flagged": False}
     store.record_messages(account="mail@example.com", mailbox="Junk Email", messages=[unflagged])
 
-    assert store.flagged_message_ids(account="mail@example.com", mailbox="Junk Email") == {
-        "flagged-1"
-    }
+    assert store.auto_delete_domains() == {"campaign.example"}
+
+
+def test_junk_regression_flagged_domain_is_global_and_durable(tmp_path: Path) -> None:
+    """Regression: one auto-flagged junk domain must apply across every account."""
+    database = tmp_path / "junk.sqlite3"
+    first_store = JunkCampaignStore(database)
+    flagged = _message("flagged-1", "ordinary@campaign.example")
+    flagged["flagged"] = True
+    first_store.record_messages(account="first@example.com", mailbox="Spam", messages=[flagged])
+
+    reopened_store = JunkCampaignStore(database)
+
+    assert reopened_store.auto_delete_domains() == {"campaign.example"}
 
 
 def test_junk_regression_provider_health_preserves_transition_state(tmp_path: Path) -> None:
@@ -154,3 +165,22 @@ def test_junk_regression_legacy_database_records_current_observation_time(tmp_pa
         minimum_messages=3,
         observation_window_days=30,
     ) == {"147719586"}
+
+
+def test_junk_regression_legacy_flagged_rows_seed_auto_delete_domains(tmp_path: Path) -> None:
+    """Regression: deployed flagged evidence must populate the permanent registry."""
+    database = tmp_path / "legacy.sqlite3"
+    store = JunkCampaignStore(database)
+    flagged = _message("flagged-1", "ordinary@remember.example")
+    flagged["flagged"] = True
+    store.record_messages(account="mail@example.com", mailbox="Spam", messages=[flagged])
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("DROP TABLE junk_auto_delete_domain")
+        connection.commit()
+    finally:
+        connection.close()
+
+    migrated_store = JunkCampaignStore(database)
+
+    assert migrated_store.auto_delete_domains() == {"remember.example"}

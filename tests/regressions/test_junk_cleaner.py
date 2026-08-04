@@ -41,7 +41,7 @@ def test_junk_regression_discovers_each_enabled_accounts_junk_mailbox() -> None:
 
 
 def test_junk_regression_flagged_message_qualifies_for_immediate_cleanup(tmp_path: Path) -> None:
-    """Regression: sender-supplied Junk flags must enter the permanent-delete set."""
+    """Regression: sender-supplied Junk flags must learn a permanent domain rule."""
     store = JunkCampaignStore(tmp_path / "junk.sqlite3")
     [message] = store.record_messages(
         account="mail@example.com",
@@ -69,8 +69,42 @@ def test_junk_regression_flagged_message_qualifies_for_immediate_cleanup(tmp_pat
         store,
         [message],
         config,
-        flagged_connector_ids={"flagged-1"},
     ) == [message]
+
+
+def test_junk_regression_learned_domain_qualifies_across_accounts(tmp_path: Path) -> None:
+    """Regression: a learned domain must delete later junk in every mailbox."""
+    store = JunkCampaignStore(tmp_path / "junk.sqlite3")
+    flagged: dict[str, object] = {
+        "id": "flagged-1",
+        "rfc_message_id": "flagged-1@example.test",
+        "sender": "first@campaign.example",
+        "flagged": True,
+    }
+    store.record_messages(account="first@example.com", mailbox="Spam", messages=[flagged])
+    [later] = store.record_messages(
+        account="second@example.com",
+        mailbox="Junk Mail",
+        messages=[
+            {
+                "id": "later-1",
+                "rfc_message_id": "later-1@example.test",
+                "sender": "different@campaign.example",
+                "flagged": False,
+            }
+        ],
+    )
+    config = JunkCleanerConfig(
+        mode="delete",
+        minimum_domains=3,
+        minimum_messages=3,
+        observation_window_days=30,
+        maximum_deletions_per_run=25,
+        providers={},
+        notification_webhook_file=None,
+    )
+
+    assert _eligible_messages(store, [later], config) == [later]
 
 
 def test_junk_regression_clears_flags_before_provider_health(

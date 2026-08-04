@@ -1,11 +1,11 @@
 # Client/server parity
 
-Every public method on `AppleMailConnector` must either be exposed as an MCP tool in `server.py` or appear in the explicit intentionally-internal set in [`check_client_server_parity.py`](../../scripts/check_client_server_parity.py).
+Every public method on `AppleMailConnector` must either be exposed as an MCP tool in `server.py` or appear in the explicit intentionally-internal set in [`check_client_server_parity.py`](../../src/apple_mail_fast_mcp/check_client_server_parity.py).
 
 Run the check directly with:
 
 ```bash
-uv run scripts/check_client_server_parity.py
+uv run apple-mail-project check-parity
 ```
 
 It is also part of `just check`. The script fails when a connector capability has no tool and no intentional classification, or when an internal entry becomes stale after a rename, removal, or new tool wrapper.

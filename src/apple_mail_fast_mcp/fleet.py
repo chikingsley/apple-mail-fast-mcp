@@ -87,8 +87,8 @@ def deploy_release(repo: Path, host: FleetHost, revision: str) -> str:
     run_bytes(["ssh", host.name, prepare], input_data=archive)
     install = (
         f"cd {shlex.quote(release_path)} && "
-        "./scripts/install-macos-launch-agent.sh && "
-        "./scripts/install-mail-ops.sh && "
+        "uv run --locked apple-mail-install service && "
+        "uv run --locked apple-mail-install ops && "
         "tailscale serve --bg --set-path=/apple-mail http://127.0.0.1:8765 && "
         f"ln -sfn {shlex.quote(release_path)} "
         f"{shlex.quote(host.home + '/.local/share/peacockery/apple-mail/current')}"

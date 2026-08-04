@@ -37,10 +37,11 @@ The fleet command creates an immutable Git-archive release on Hochi, installs th
 For direct development or recovery on the Mac, run:
 
 ```bash
-./scripts/install-macos-launch-agent.sh
+uv run apple-mail-install service
+uv run apple-mail-install ops
 ```
 
-The release installs three explicit components: a resident signed AppleScript helper, a resident authenticated MCP service, and one five-minute operations supervisor that exits between runs. The supervisor captures and clears provider-supplied Junk flags before isolated provider health and permanent deletion stages across every enabled Junk, Junk Email, Junk Mail, and Spam folder. Gmail and Microsoft use provider APIs; standard IMAP accounts use scoped UID EXPUNGE when the server advertises UIDPLUS. A provider failure can defer its own deletions while flag cleanup and every other account continue. Account-scoped authentication recovery runs provider CLIs directly; Microsoft device codes arrive as their own copyable Discord messages.
+The release installs three explicit components: a resident signed AppleScript helper, a resident authenticated MCP service, and one five-minute operations supervisor that exits between runs. The supervisor captures and clears provider-supplied Junk flags before isolated provider health and permanent deletion stages across every enabled Junk, Junk Email, Junk Mail, and Spam folder. Its SQLite ledger records every usable junk observation in `junk_campaign_observation`, every permanent deletion outcome in `junk_cleanup_action`, provider state in `provider_health`, and every domain learned from auto-flagged junk in `junk_auto_delete_domain`. The learned-domain registry is global across configured accounts and has no expiration: any later message from a learned domain that reaches any scanned junk folder qualifies for automatic permanent deletion. Gmail and Microsoft use provider APIs; standard IMAP accounts use scoped UID EXPUNGE when the server advertises UIDPLUS. A provider failure can defer its own deletions while flag cleanup and every other account continue. Account-scoped authentication recovery runs provider CLIs directly; Microsoft device codes arrive as their own copyable Discord messages.
 
 Inspect the complete Apple Mail inventory, latest supervisor result, and every other user LaunchAgent on Hochi with:
 

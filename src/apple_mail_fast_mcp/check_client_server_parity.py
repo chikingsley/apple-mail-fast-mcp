@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 CONNECTOR = ROOT / "src/apple_mail_fast_mcp/mail_connector.py"
 SERVER = ROOT / "src/apple_mail_fast_mcp/server.py"
 

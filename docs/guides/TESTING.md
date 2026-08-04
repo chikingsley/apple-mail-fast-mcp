@@ -1,6 +1,6 @@
 # Testing
 
-The suite protects behavior, not a coverage percentage. `scripts/check_test_policy.py` rejects tests outside the two supported categories and rejects regression tests that do not identify an issue, bug, or regression.
+The suite protects behavior, not a coverage percentage. `uv run apple-mail-project check-test-policy` rejects tests outside the two supported categories and rejects regression tests that do not identify an issue, bug, or regression.
 
 ## Regressions
 

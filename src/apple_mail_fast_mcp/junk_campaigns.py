@@ -123,6 +123,14 @@ class JunkCampaignStore:
             );
             CREATE INDEX IF NOT EXISTS junk_campaign_local_part_idx
                 ON junk_campaign_observation (account, local_part, domain);
+            CREATE TABLE IF NOT EXISTS junk_auto_delete_domain (
+                domain TEXT PRIMARY KEY,
+                source_account TEXT NOT NULL,
+                source_mailbox TEXT NOT NULL,
+                source_message_id TEXT NOT NULL,
+                first_flagged_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_flagged_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS junk_cleanup_action (
                 account TEXT NOT NULL,
                 mailbox TEXT NOT NULL,
@@ -157,6 +165,15 @@ class JunkCampaignStore:
                 connection.execute(
                     f"ALTER TABLE junk_campaign_observation ADD COLUMN {name} {declaration}"
                 )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO junk_auto_delete_domain
+                (domain, source_account, source_mailbox, source_message_id)
+            SELECT domain, account, mailbox, message_id
+            FROM junk_campaign_observation
+            WHERE was_flagged = 1
+            """
+        )
 
     def record_messages(
         self,
@@ -207,18 +224,31 @@ class JunkCampaignStore:
                     for item in evidence
                 ],
             )
+            connection.executemany(
+                """
+                INSERT INTO junk_auto_delete_domain
+                    (domain, source_account, source_mailbox, source_message_id)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (domain) DO UPDATE SET
+                    last_flagged_at = CURRENT_TIMESTAMP
+                """,
+                [
+                    (
+                        item.fingerprint.domain,
+                        item.account,
+                        item.mailbox,
+                        item.connector_id,
+                    )
+                    for item in evidence
+                    if messages_by_id[item.connector_id].get("flagged") is True
+                ],
+            )
         return evidence
 
-    def flagged_message_ids(self, *, account: str, mailbox: str) -> set[str]:
-        """Return message ids durably observed with a sender/provider flag."""
+    def auto_delete_domains(self) -> set[str]:
+        """Return sender domains learned permanently from auto-flagged junk."""
         with self._connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT message_id FROM junk_campaign_observation
-                WHERE account = ? AND mailbox = ? AND was_flagged = 1
-                """,
-                (account, mailbox),
-            ).fetchall()
+            rows = connection.execute("SELECT domain FROM junk_auto_delete_domain").fetchall()
         return {str(row[0]) for row in rows}
 
     def qualified_local_parts(

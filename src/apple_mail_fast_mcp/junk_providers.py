@@ -79,10 +79,18 @@ class ProviderAccount:
 class GmailPurger:
     """Resolve RFC Message-IDs in Gmail Spam and call messages.delete."""
 
-    def __init__(self, *, account: str, gog_path: str, runner: CommandRunner = run_command) -> None:
+    def __init__(
+        self,
+        *,
+        account: str,
+        gog_path: str,
+        runner: CommandRunner = run_command,
+        environment: Mapping[str, str] | None = None,
+    ) -> None:
         self.account = account
         self.gog_path = gog_path
         self.runner = runner
+        self.environment = environment
 
     def resolve_message_ids(self, rfc_message_id: str) -> list[str]:
         """Resolve a current Spam message to provider-native Gmail ids."""
@@ -102,7 +110,8 @@ class GmailPurger:
                 self.account,
                 "--json",
                 "--no-input",
-            )
+            ),
+            environment=self.environment,
         )
         messages = _json_object(raw).get("messages", [])
         message_ids = [row.get("id") for row in messages if isinstance(row, dict)]
@@ -128,7 +137,8 @@ class GmailPurger:
                 self.account,
                 "--json",
                 "--no-input",
-            )
+            ),
+            environment=self.environment,
         )
         email_address = _json_object(raw).get("emailAddress")
         if not isinstance(email_address, str) or email_address.lower() != self.account.lower():
@@ -156,7 +166,8 @@ class GmailPurger:
                     "--allow-write",
                     "--force",
                     "--no-input",
-                )
+                ),
+                environment=self.environment,
             )
         return len(valid_ids)
 
@@ -338,7 +349,10 @@ def build_purger(
         if gog_path is None:
             raise PermanentDeleteError("gog is unavailable on this host")
         return GmailPurger(
-            account=account.credential or email_account, gog_path=gog_path, runner=runner
+            account=account.credential or email_account,
+            gog_path=gog_path,
+            runner=runner,
+            environment=gog_environment(source_home),
         )
     if account.kind == "microsoft":
         m365_path = shutil.which("m365")
@@ -359,3 +373,13 @@ def build_purger(
             connector=connector,
         )
     raise PermanentDeleteError(f"Unsupported junk provider: {account.kind}")
+
+
+def gog_environment(source_home: Path) -> dict[str, str]:
+    """Load gog's file-backed keyring password into one child-process environment."""
+    password_file = source_home / ".config/gogcli/keyring-password"
+    if not password_file.is_file() or password_file.is_symlink():
+        raise PermanentDeleteError(f"gog keyring password file is unavailable: {password_file}")
+    environment = dict(os.environ)
+    environment["GOG_KEYRING_PASSWORD"] = password_file.read_text(encoding="utf-8").strip()
+    return environment

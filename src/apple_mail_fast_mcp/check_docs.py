@@ -8,7 +8,7 @@ from pathlib import Path
 
 from apple_mail_fast_mcp import server
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 REMOVED_TOOLS = {

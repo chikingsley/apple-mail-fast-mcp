@@ -1,25 +1,25 @@
 set shell := ["bash", "-cu"]
 
 check:
-    uv run ruff check src tests scripts/check_*.py
-    uv run ruff format --check src tests scripts/check_*.py
+    uv run ruff check src tests
+    uv run ruff format --check src tests
     uv run ty check
     # pytest injects these fixtures and mock callables intentionally accept **kw.
     uv run vulture src tests --min-confidence 90 --ignore-names prompt,kw,isolated_drafts
-    uv run scripts/check_test_policy.py
-    uv run scripts/check_client_server_parity.py
-    uv run scripts/check_docs.py
-    ./scripts/check_applescript_safety.sh
+    uv run apple-mail-project check-test-policy
+    uv run apple-mail-project check-parity
+    uv run apple-mail-project check-docs
+    uv run apple-mail-project check-applescript
     uv run pytest
     uv --preview-features audit-command audit --locked
     uv build
 
 fix:
-    uv run ruff check --fix src tests scripts/check_*.py
-    uv run ruff format src tests scripts/check_*.py
+    uv run ruff check --fix src tests
+    uv run ruff format src tests
 
 test:
-    uv run scripts/check_test_policy.py
+    uv run apple-mail-project check-test-policy
     uv run pytest
 
 live:
@@ -30,7 +30,8 @@ live-send:
         -k send_email_arrives_in_inbox --run-live --run-send-live -v
 
 install-macos:
-    ./scripts/install-macos-launch-agent.sh
+    uv run apple-mail-install service
+    uv run apple-mail-install ops
 
 fleet:
     uv run apple-mail-fleet

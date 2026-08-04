@@ -6,12 +6,13 @@ import ast
 import re
 import sys
 from pathlib import Path
+from typing import TypeIs
 
-TEST_ROOT = Path(__file__).resolve().parents[1] / "tests"
+TEST_ROOT = Path(__file__).resolve().parents[2] / "tests"
 REGRESSION_MARKER = re.compile(r"#\d+|\b(?:bug|regression)\b", re.IGNORECASE)
 
 
-def _is_test(node: ast.AST) -> bool:
+def _is_test(node: ast.AST) -> TypeIs[ast.FunctionDef | ast.AsyncFunctionDef]:
     return isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(
         "test_"
     )
