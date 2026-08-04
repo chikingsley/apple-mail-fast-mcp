@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>studio.peacockery.apple-mail-junk-flag-cleaner</string>
+  <string>studio.peacockery.apple-mail-ops</string>
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/env</string>
@@ -11,9 +11,8 @@
     <string>run</string>
     <string>--locked</string>
     <string>--no-dev</string>
-    <string>python</string>
-    <string>-m</string>
-    <string>apple_mail_fast_mcp.junk_cleaner</string>
+    <string>apple-mail-ops</string>
+    <string>run</string>
   </array>
   <key>WorkingDirectory</key>
   <string>__PROJECT_DIR__</string>
@@ -22,9 +21,11 @@
     <key>APPLE_MAIL_MCP_APPLESCRIPT_SOCKET</key>
     <string>__APPLE_MAIL_MCP_APPLESCRIPT_SOCKET__</string>
     <key>APPLE_MAIL_MCP_JUNK_CONFIG</key>
-    <string>__JUNK_CONFIG__</string>
+    <string>__MAIL_OPS_CONFIG__</string>
+    <key>APPLE_MAIL_MCP_OPS_STATUS</key>
+    <string>__MAIL_OPS_STATUS__</string>
     <key>PATH</key>
-    <string>__HOME__/.config/apple-mail-fast-mcp/bin:__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>__HOME__/.config/apple-mail-fast-mcp/bin:__HOME__/.local/bin:__HOME__/.opencode/bin:__HOME__/.kimi-code/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -32,9 +33,11 @@
   <integer>300</integer>
   <key>ProcessType</key>
   <string>Background</string>
+  <key>AbandonProcessGroup</key>
+  <true/>
   <key>StandardOutPath</key>
-  <string>__LOG_DIR__/junk-flag-cleaner.out.log</string>
+  <string>__LOG_DIR__/mail-ops.out.log</string>
   <key>StandardErrorPath</key>
-  <string>__LOG_DIR__/junk-flag-cleaner.err.log</string>
+  <string>__LOG_DIR__/mail-ops.err.log</string>
 </dict>
 </plist>

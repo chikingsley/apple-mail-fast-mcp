@@ -1,9 +1,18 @@
 """Regressions for narrow provider-native permanent deletion adapters."""
 
 import json
+import subprocess
 from pathlib import Path
+from unittest.mock import MagicMock
 
-from apple_mail_fast_mcp.junk_providers import GmailPurger, MicrosoftPurger
+import pytest
+
+from apple_mail_fast_mcp.junk_providers import (
+    GmailPurger,
+    MicrosoftPurger,
+    PermanentDeleteError,
+    run_command,
+)
 
 
 class RecordingRunner:
@@ -16,6 +25,18 @@ class RecordingRunner:
     def __call__(self, arguments, *, environment=None) -> str:
         self.calls.append((tuple(arguments), environment))
         return next(self.responses)
+
+
+def test_junk_regression_provider_timeout_becomes_typed_failure(monkeypatch) -> None:
+    """Regression: an m365 timeout must remain inside the scheduled cleaner result."""
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        MagicMock(side_effect=subprocess.TimeoutExpired(["m365", "request"], 45)),
+    )
+
+    with pytest.raises(PermanentDeleteError, match="timed out after 45 seconds"):
+        run_command(["m365", "request"])
 
 
 def test_junk_regression_gmail_resolves_inside_spam_before_permanent_delete() -> None:

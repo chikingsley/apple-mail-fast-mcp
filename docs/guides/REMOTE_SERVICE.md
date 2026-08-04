@@ -4,19 +4,13 @@ Run one Apple Mail MCP process on the Mac that owns Mail.app, then reach it from
 
 ## Install the LaunchAgent
 
-For the Peacockery fleet, run the repository-owned release command from a clean,
-pushed `main` checkout on GMK:
+For the Peacockery fleet, run the repository-owned release command from a clean, pushed `main` checkout on GMK:
 
 ```bash
 uv run apple-mail-fleet
 ```
 
-It streams `git archive` over SSH into
-`~/.local/share/peacockery/apple-mail/releases/<commit>`, installs both
-LaunchAgents from that immutable tree, updates the `current` symlink, configures
-the Tailscale Serve path and agent clients, distributes the Apple Mail skill,
-and verifies the live MCP endpoint. Existing Hochi development checkouts stay
-independent from the running service.
+It streams `git archive` over SSH into `~/.local/share/peacockery/apple-mail/releases/<commit>`, installs the three LaunchAgents from that immutable tree, updates the `current` symlink, configures the Tailscale Serve path and agent clients, distributes the Apple Mail skill, and verifies the live MCP endpoint. Existing Hochi development checkouts stay independent from the running service.
 
 For direct development or recovery from a repository checkout on the Mac:
 
@@ -24,7 +18,7 @@ For direct development or recovery from a repository checkout on the Mac:
 ./scripts/install-macos-launch-agent.sh
 ```
 
-The installer creates or reuses a machine-local code-signing identity, builds and signs `~/Applications/Apple Mail MCP Helper.app`, loads the helper and MCP server as separate per-user LaunchAgents, performs a locked, runtime-only `uv` sync, and verifies Mail Automation. The MCP service enables the IMAP connection pool, masks internal FastMCP errors, disables startup update checks, and writes logs to `~/Library/Logs/apple-mail-fast-mcp/`.
+The installer creates or reuses a machine-local code-signing identity, builds and signs `~/Applications/Apple Mail MCP Helper.app`, loads the helper and MCP server as resident per-user LaunchAgents, and loads `studio.peacockery.apple-mail-ops` as one scheduled supervisor. The supervisor exits between five-minute runs. Its internal capture/unflag stage always precedes isolated provider-health, incident-recovery, and permanent-deletion stages. The MCP service enables the IMAP connection pool, masks internal FastMCP errors, disables startup update checks, and writes logs to `~/Library/Logs/apple-mail-fast-mcp/`.
 
 The helper is a small resident native app with no TCP or HTTP listener. It creates `~/.config/apple-mail-fast-mcp/applescript-helper.sock` as an owner-only `0600` Unix socket and rejects clients from another user ID. The Python service sends its internally generated AppleScript through that local socket, and the helper executes it through `NSAppleScript`. Because launchd owns the helper process directly, macOS Automation attributes Mail access to the app instead of `uv` or an ephemeral Python executable.
 
@@ -37,9 +31,9 @@ The installer triggers the macOS consent dialog from the signed helper. Click **
   --request-mail-automation
 ```
 
-The command asks the resident helper for Mail's account count, which exercises the real Automation permission rather than an unrestricted metadata query such as Mail's version. The `uv > Mail` toggle is not used by this service.
+The command asks the resident helper for Mail's account count, which exercises the real Automation permission rather than an unrestricted metadata query such as Mail's version. The signed helper owns this service's Mail permission.
 
-The installer automatically creates or reuses a valid ten-year local identity named `Apple Mail MCP Local Signing`. macOS requests one administrator authorization when the certificate is first trusted. Later rebuilds retain the same designated requirement and do not require another Automation grant.
+The installer automatically creates or reuses a valid ten-year local identity named `Apple Mail MCP Local Signing`. macOS requests one administrator authorization when the certificate is first trusted. Later rebuilds retain the same designated requirement and reuse that Automation grant.
 
 To create or repair the identity without reinstalling the service, run:
 
@@ -56,7 +50,7 @@ export APPLE_MAIL_MCP_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)"
 
 The practical certificate choices are:
 
-- A local self-signed code-signing certificate: free and stable on Hochi, but not Apple-trusted, notarizable, or suitable for distribution.
+- A local self-signed code-signing certificate: free and stable for private use on Hochi.
 - Apple Development: Apple-issued and appropriate for development on registered machines.
 - Developer ID Application: Apple-issued for software distributed outside the Mac App Store and the correct choice if the helper will later be notarized or installed elsewhere.
 
@@ -152,13 +146,13 @@ Point any Streamable HTTP MCP client at the HTTPS endpoint above and configure i
 Inspect the service and recent errors:
 
 ```bash
-launchctl print "gui/$(id -u)/studio.peacockery.apple-mail-mcp"
-launchctl print "gui/$(id -u)/studio.peacockery.apple-mail-mcp-helper"
+uv run apple-mail-ops status
+uv run apple-mail-ops status --json
 tail -n 100 ~/Library/Logs/apple-mail-fast-mcp/service.err.log
 tail -n 100 ~/Library/Logs/apple-mail-fast-mcp/helper.err.log
+tail -n 100 ~/Library/Logs/apple-mail-fast-mcp/mail-ops.err.log
 ```
 
-After pushing a fleet update to `main`, run `uv run apple-mail-fleet` on GMK.
-The command rebuilds the native helper, performs a locked sync, refreshes the
-configured harnesses and skill copies, then verifies the service. Direct Mac
-development uses `./scripts/install-macos-launch-agent.sh`.
+The status command reports the immutable release, all three Apple Mail components, the latest complete supervisor result, recovery incidents, and all other user LaunchAgents discovered on the Mac. Provider authentication failures generate a transition-only Discord alert and one rate-limited recovery-agent dispatch per account/failure/day. The recovery agent owns the provider CLI login and uses `apple-mail-ops notify` when Simon must enter a device code or approve a browser prompt.
+
+After pushing a fleet update to `main`, run `uv run apple-mail-fleet` on GMK. The command rebuilds the native helper, performs a locked sync, refreshes the configured harnesses and skill copies, then verifies the service. Direct Mac development uses `./scripts/install-macos-launch-agent.sh`.

@@ -2,22 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
 ### Added
 
-- A repository-owned `apple-mail-fleet` command now creates immutable Hochi
-  releases, configures the private Tailscale Serve endpoint in installed Codex,
-  Claude, OpenCode, and Kimi harnesses, distributes a shared Apple Mail skill,
-  and verifies service, client, and skill state across the agent fleet.
+- One scheduled `apple-mail-ops` supervisor now clears Junk flags before isolated deletion and provider-health stages, retains flagged-message deletion eligibility durably, dispatches a rate-limited recovery agent for authentication failures, and exposes the complete service/LaunchAgent inventory through `apple-mail-ops status`.
+- A repository-owned `apple-mail-fleet` command now creates immutable Hochi releases, configures the private Tailscale Serve endpoint in installed Codex, Claude, OpenCode, and Kimi harnesses, distributes a shared Apple Mail skill, and verifies service, client, and skill state across the agent fleet.
 
 ### Security
 
-- The macOS LaunchAgent installer now always creates or reuses an owner-only
-  HTTP bearer token and always enables bearer authentication on the service.
+- The macOS LaunchAgent installer now always creates or reuses an owner-only HTTP bearer token and always enables bearer authentication on the service.
 
 ## [0.10.2] - 2026-06-13
 
@@ -282,7 +278,6 @@ Performance + correctness release. The headline arc is **IMAP fast paths for eve
 
 **Complexity gate now enforces CC ≤ 20 (#174):** `scripts/check_complexity.sh` was filtering radon's JSON output via `-n F`, which limits to functions with CC ≥ 41. Functions in the dangerous CC 21–40 range silently passed the gate. Switched the filter to `-n D` (CC ≥ 21) so the threshold is actually meaningful, and added a per-function allowlist with per-entry CC ceilings: documented exceptions stay green at their current levels, new code over CC 20 fails the gate, and any allowlisted function that creeps higher than its ceiling fails as a regression. Five long-standing exceptions are listed in the allowlist pending dedicated refactor PRs: `server.py::create_draft` (36), `server.py::update_draft` (34), `mail_connector.py::AppleMailConnector.create_draft` (25), and the two threading helpers `_thread_via_xgm_per_mailbox` and `_thread_via_imap_thread` (21 each). See [`docs/guides/COMPLEXITY.md`](docs/guides/COMPLEXITY.md) for the allowlist mechanism and ratchet semantics.
 
-
 **`from_account` sender path now applies sanitize_input before escape_applescript_string (#173):** The security checklist's two-step convention for AppleScript interpolation (sanitize then escape) was missing from the sender clause in `create_draft` / `update_draft`. Low practical risk — the value comes from Mail.app's own account list, not direct user input — but the convention exists so we don't have to risk-assess each interpolation site individually. The Display-Name <email> format from #158 broadened what characters can appear here, making the convention more relevant. Includes a regression test asserting null bytes embedded in the resolver's output are stripped before reaching the AppleScript.
 
 **Test-mode safety gap on implicit-reply `send_now` (#175):** In test mode (`MAIL_TEST_MODE=true`), `create_draft(reply_to=X, send_now=True)` and the analogous `update_draft` path bypassed the reserved-domain safety check when no explicit `to`/`cc`/`bcc` overrides were supplied — Mail.app derived recipients from the original message at send time, so the server's pre-flight gate (which only fired on non-empty recipient lists) was skipped. The gap let test-mode replies target real addresses without surfacing as safety violations. Fixed at two layers: server-tool wrappers now always call `check_test_mode_safety` on `send_now=True` (even with empty recipients), and `check_test_mode_safety` itself now treats empty/None recipients on a `SEND_OPERATIONS` call in test mode as a `safety_violation`. The fix forces explicit recipients for any test-mode send. Surfaced during the v0.7.0 release-review documentation pass; analog of the v0.6 `reply_to_message` hardcoded block that was dropped when the drafts lifecycle (#134) replaced the four old send tools.
@@ -336,7 +331,7 @@ The audit-driven consolidations remove or reshape several public tools. Per-chan
 
 **Drafts lifecycle (#134):** Three new tools — `create_draft`, `update_draft`, `delete_draft` — give a complete compose/reply/forward authoring loop. `seed_kind="compose" | "reply" | "reply_all" | "forward"` selects the source-message-derived defaults (subject prefix, recipients, quoted body); `template_name` renders an existing template into the draft body. Save-as-draft semantics by default (no send); `send_now=true` is an explicit opt-in that runs through the same safety + rate-limit gates as the prior send tools. Draft state persisted under `~/.apple_mail_mcp/drafts/` so subsequent calls can resolve a draft by id. **Subsumes and removes** `send_email`, `send_email_with_attachments`, `reply_to_message`, `forward_message`. Migration: `send_email(to=..., subject=..., body=...)` → `create_draft(seed_kind="compose", to=[...], subject=..., body=..., send_now=True)`; `reply_to_message(message_id=X, body=Y)` → `create_draft(seed_kind="reply", reply_to_id=X, body=Y, send_now=True)`; `forward_message(message_id=X, to=[...])` → `create_draft(seed_kind="forward", forward_id=X, to=[...], send_now=True)`. (#160)
 
-**IMAP thread-discovery Tier 1.5 + Tier 2 (#123, #125):** Completes the tiered dispatch in `find_thread_members` (started in v0.6.0 as Tier 1 + Tier 3). **Tier 1.5 (Gmail per-mailbox X-GM-THRID):** when `X-GM-EXT-1` is advertised but `[Gmail]/All Mail` is hidden over IMAP (per-folder size opt-out — common), find the anchor's UID in INBOX or `\Sent`, FETCH its X-GM-THRID, then SEARCH X-GM-THRID across every selectable folder. ~2+M*2 round-trips (~186 on a 92-folder account vs ~1100 for BFS). **Tier 2 (RFC 5256 THREAD):** when `THREAD=REFERENCES` or `THREAD=REFS` is advertised (Fastmail, some Dovecot deployments), per mailbox issue a narrow SEARCH for anchor UID + sibling refs, then THREAD on the full mailbox to collect intersecting clusters, then FETCH ENVELOPE+FLAGS. Both tiers fall through cleanly to the existing Tier 3 (header-search BFS) when capabilities aren't advertised or the server rejects mid-flight. Cleared the v0.6.0 deferrals — Gmail / Fastmail / iCloud / generic IMAP all now land on the most efficient strategy their server actually supports. (#169)
+**IMAP thread-discovery Tier 1.5 + Tier 2 (#123, #125):** Completes the tiered dispatch in `find_thread_members` (started in v0.6.0 as Tier 1 + Tier 3). **Tier 1.5 (Gmail per-mailbox X-GM-THRID):** when `X-GM-EXT-1` is advertised but `[Gmail]/All Mail` is hidden over IMAP (per-folder size opt-out — common), find the anchor's UID in INBOX or `\Sent`, FETCH its X-GM-THRID, then SEARCH X-GM-THRID across every selectable folder. ~2+M\*2 round-trips (~186 on a 92-folder account vs ~1100 for BFS). **Tier 2 (RFC 5256 THREAD):** when `THREAD=REFERENCES` or `THREAD=REFS` is advertised (Fastmail, some Dovecot deployments), per mailbox issue a narrow SEARCH for anchor UID + sibling refs, then THREAD on the full mailbox to collect intersecting clusters, then FETCH ENVELOPE+FLAGS. Both tiers fall through cleanly to the existing Tier 3 (header-search BFS) when capabilities aren't advertised or the server rejects mid-flight. Cleared the v0.6.0 deferrals — Gmail / Fastmail / iCloud / generic IMAP all now land on the most efficient strategy their server actually supports. (#169)
 
 **`atexit` hook for `ImapConnectionPool.close()` (#127):** Cached IMAP sessions close cleanly on interpreter shutdown rather than dropping connections silently. Matters for short-lived tools, CI runs, and any environment where the parent shell doesn't otherwise exercise the cleanup path. Idempotent — safe to call `close()` manually too. (#167)
 
@@ -352,8 +347,7 @@ The audit-driven consolidations remove or reshape several public tools. Per-chan
 
 **`update_mailbox` / `delete_mailbox` refuse Gmail system labels (#164):** Operations targeting the bare `[Gmail]` parent or any `[Gmail]/...` child path now return `error_type: "unsupported_gmail_system_label"` instead of failing with a confusing `IMAPClientError` (or worse, a no-op "success"). For `update_mailbox`, both the source `name` and the resulting destination (when `new_parent` is provided) are checked. Pre-flight: no AppleScript or IMAP traffic. Localized Gmail prefixes (e.g. `[Google Mail]/Tutta la posta` on Italian Gmail) intentionally not detected — proper detection needs an IMAP session for SPECIAL-USE flag enumeration; tracked as a follow-up. The Gmail-label CRUD tools (sub-feature 2 of #164) remain deferred. (#170)
 
-**"Display Name &lt;email&gt;" sender format (#158):** The `sender` field on message objects now consistently emits the human-readable form `"Alice <alice@example.com>"` instead of the bare email address. Provides display-friendly output without losing parseability — callers that need just the email can split on `<`. **Observable behavior change:** callers expecting the bare-email format from the AppleScript path will need to adjust. (#161)
-
+**"Display Name \<email>" sender format (#158):** The `sender` field on message objects now consistently emits the human-readable form `"Alice <alice@example.com>"` instead of the bare email address. Provides display-friendly output without losing parseability — callers that need just the email can split on `<`. **Observable behavior change:** callers expecting the bare-email format from the AppleScript path will need to adjust. (#161)
 
 **`update_message` consolidates `mark_as_read` + `move_messages` + `flag_message` (#135):** Single CRUD-style update tool replaces the three previous mutation tools. Patch semantics — caller specifies only the fields to change; all mutations apply in one AppleScript pass via the existing bulk-update helper. Order of operations: read-state and flag changes apply first (in source mailbox), then the move (IMAP requires the message to exist in the source folder for STORE before MOVE). Trash-restore is just `update_message(ids, destination_mailbox="INBOX", source_mailbox="Deleted Messages", account="iCloud")` — no new verb required. Migration: `mark_as_read([id], read=True)` → `update_message([id], read_status=True)`; `move_messages([id], "Archive", "Gmail")` → `update_message([id], destination_mailbox="Archive", account="Gmail")`; `flag_message([id], "red")` → `update_message([id], flag_color="red")`. Sixth consolidation from the #129 audit. Tool count: 24 → 22.
 
@@ -393,6 +387,7 @@ Performance and ergonomics release. The IMAP delegation arc started in v0.5.0 is
 **Setup-IMAP CLI (#76):** New `apple-mail-mcp setup-imap --account <name>` subcommand replaces the raw `security add-generic-password` recipe. Prompts for the password via `getpass` (no shell history), writes the Keychain entry idempotently, opens an IMAP connection to verify the password actually works, rolls back on auth failure. `--uninstall` removes the entry. `--email` overrides the Mail.app-derived default for the rare alias case. Default invocation (no subcommand) still starts the MCP server, so Claude Desktop is unaffected. (#116)
 
 **IMAP delegation for read tools:**
+
 - `get_message` (#72): one-round-trip lookup via `SEARCH HEADER Message-ID` + `FETCH` when `account` and `mailbox` are supplied. Replaces the AppleScript account×mailbox scan (~6-18s worst case). New `headers_only` knob skips body fetch when only metadata is needed. Surfaced + fixed a latent identifier mismatch: AppleScript path uses Mail.app's internal numeric id; IMAP returns RFC 5322 Message-IDs. Callers who forward `account`+`mailbox` from `search_messages` now stay on the IMAP path consistently. (#117)
 - `get_attachments` (#73): one BODYSTRUCTURE FETCH replaces the per-attachment property loop. Also surfaces three classes of attachment Mail.app's AppleScript silently drops: forwarded `message/rfc822` parts, multipart/related inline images with filenames, Unicode filenames. (#119)
 - `get_thread` (#122): tiered, capability-detected dispatch. Tier 1 is Gmail's `X-GM-THRID` against `[Gmail]/All Mail` — ~5 round-trips, mailbox-count-independent (replaces ~1100 round-trips on a 91-label account when All Mail is exposed over IMAP). Falls through cleanly to the existing per-mailbox header-search BFS when the capability or `[Gmail]/All Mail` isn't available. (#126)
@@ -443,12 +438,14 @@ Major minor release. Fifteen new MCP tools across four feature areas (account di
 **Email templates (#30):** `list_templates`, `get_template`, `save_template`, `delete_template`, `render_template`. File-per-template storage at `~/.apple_mail_mcp/templates/<name>.md` (overridable via `APPLE_MAIL_MCP_HOME`). Simple `{placeholder}` substitution with reply-context auto-fills (`recipient_name`, `recipient_email`, `original_subject`, `today`). Render-only API — caller passes the result to existing `reply_to_message`/`forward_message`/`send_email`. First persistent-state feature in the project; the `~/.apple_mail_mcp/` convention is documented in CLAUDE.md. (#85)
 
 **Discovery & threads:**
+
 - `list_accounts` returns each account's id (UUID), display name, email addresses, type, and enabled state (#62, closes #26)
 - `list_rules` lists Mail.app rules with index, name, and enabled state (#64, closes #27)
 - `get_thread` reconstructs conversations using IMAP THREAD when available, falling back to AppleScript header-based reconstruction (#67, #81; closes #29 and #66)
 - `search_messages` gains 4 new filters: `is_flagged`, `date_from`, `date_to`, `has_attachment` (#65, closes #28)
 
 **IMAP-backed performance:**
+
 - New `imap_connector.py` and `keychain.py` modules. When a Keychain entry exists for an account, search and thread tools transparently use IMAP for server-side execution (~1s vs 1-5s); on any IMAP failure they silently fall back to AppleScript with no functional loss. (#78, #79; closes #40 and #41)
 - IMAP graceful-degradation invariants documented (#71)
 - IMAP auth path decision documented after Keychain-spike findings (#69, #70; closes #39 and #68)
@@ -456,6 +453,7 @@ Major minor release. Fifteen new MCP tools across four feature areas (account di
 **Account-id (UUID) acceptance:** Account-gated tools now accept either the display name or the stable account UUID (returned by `list_accounts`). Names remain valid for convenience; UUIDs survive renames. (#82, closes #61)
 
 **Documentation & contributor experience:**
+
 - `docs/guides/SECURITY_CHECKLIST.md` unifies security guidance previously scattered across CLAUDE.md (#93, closes #87)
 - CONTRIBUTING.md adds an acknowledgment to early contributors whose PRs were closed without comment, plus issue-first workflow guidance and granular test requirements (#93, closes #87)
 - PR template surfaces linked-issue and tests-added checks as explicit fields (#95, closes #88)
@@ -463,6 +461,7 @@ Major minor release. Fifteen new MCP tools across four feature areas (account di
 - Tools count in README and CLAUDE.md brought current (14 → 26)
 
 **Tooling:**
+
 - `/merge-and-status` slash command now surfaces open PRs from external contributors so they don't sit unreviewed (#94, closes #90)
 
 ### Fixed
@@ -481,12 +480,15 @@ Major minor release. Fifteen new MCP tools across four feature areas (account di
 Patch release: dep hygiene and v0.4.0 follow-ups. Four connector bugs that unit tests couldn't catch were surfaced by running the three new integration tests against real Mail.app.
 
 ### Added
+
 - Integration tests for `list_accounts`, `get_message`, and `get_attachments` against real Mail.app, fulfilling the #23 design doc commitment (#57)
 
 ### Changed
+
 - Bumped transitive deps to clear `pip-audit` findings from the v0.4.0 release: `authlib` 1.6.9 → 1.7.0, `cryptography` 46.0.6 → 46.0.7, `pytest` 9.0.2 → 9.0.3, `python-multipart` 0.0.22 → 0.0.26. `fastmcp`/`mcp`/`pydantic`/`starlette`/`uvicorn` unchanged (#57)
 
 ### Fixed
+
 - `search_messages` with no filter conditions emitted `messages of mailboxRef whose true` — Mail rejected with error -1726. The `whose` clause is now dropped entirely when no filters are supplied (#57)
 - `search_messages` with a `limit` emitted `items 1 thru N of (messages of mailboxRef …)` — Mail rejected with error -1728. Replaced with a `count of` + indexed `item i of` repeat loop (#57)
 - `_run_applescript` error-substring matcher checked for straight-apostrophe `Can't`, but macOS stderr uses curly `Can’t`. `MailAccountNotFoundError` and `MailMailboxNotFoundError` were silently degraded to generic errors. Curly apostrophes are now normalized before dispatch (#57)
@@ -497,6 +499,7 @@ Patch release: dep hygiene and v0.4.0 follow-ups. Four connector bugs that unit 
 Quality and infrastructure milestone. No new MCP tools; focus on test coverage, safety, and parsing robustness.
 
 ### Added
+
 - Test-mode safety system (`MAIL_TEST_MODE`, `MAIL_TEST_ACCOUNT`) — account-gated destructive operations are constrained to a designated test account and sends are constrained to RFC 2606 reserved domains (#19)
 - Three-tier sliding-window rate limiting (general / send / expensive) replacing the previous stub (#17)
 - Proper MCP elicitation for destructive operation confirmation, replacing the previous stub (#18)
@@ -508,11 +511,13 @@ Quality and infrastructure milestone. No new MCP tools; focus on test coverage, 
 - IMAP hybrid-approach research document (#15)
 
 ### Changed
+
 - AppleScript output now emits JSON via ASObjC + `NSJSONSerialization` instead of the fragile pipe-delimited format that broke silently when any field contained `|` (#23). Finishes previously-placeholder `list_accounts` and `list_mailboxes` return shapes.
 - Coverage threshold raised from 60 % to 90 % in both `pyproject.toml` and CI, matching the documented target (#20)
 - Pre-commit hook now enforces version sync across `pyproject.toml`, `__init__.py`, and `.claude/CLAUDE.md` — failures block the commit locally instead of surfacing later in CI (#25)
 
 ### Fixed
+
 - Three `NSJSONSerialization` selector-collision bugs discovered during the JSON-output migration's integration smoke: `name`, `id`, and `size` AppleScript record keys were silently dropped and are now quoted as `|name|`, `|id|`, `|size|` (#23)
 
 ## [0.3.0] - 2025-10-11
@@ -520,6 +525,7 @@ Quality and infrastructure milestone. No new MCP tools; focus on test coverage, 
 Phase 3: Smart reply and forward.
 
 ### Added
+
 - `reply_to_message` tool with reply-all support
 - `forward_message` tool with CC/BCC support
 - Reply/forward security tests (body sanitization, special character escaping)
@@ -529,6 +535,7 @@ Phase 3: Smart reply and forward.
 Phase 2: Message management and attachments.
 
 ### Added
+
 - `send_email_with_attachments` tool
 - `get_attachments` tool
 - `save_attachments` tool with directory validation
@@ -544,6 +551,7 @@ Phase 2: Message management and attachments.
 Initial release. Phase 1: Core mail operations.
 
 ### Added
+
 - `list_mailboxes` tool
 - `search_messages` tool with sender/subject/read-status filters
 - `get_message` tool with optional content inclusion

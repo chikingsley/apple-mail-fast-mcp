@@ -88,7 +88,7 @@ def deploy_release(repo: Path, host: FleetHost, revision: str) -> str:
     install = (
         f"cd {shlex.quote(release_path)} && "
         "./scripts/install-macos-launch-agent.sh && "
-        "./scripts/install-junk-flag-cleaner.sh && "
+        "./scripts/install-mail-ops.sh && "
         "tailscale serve --bg --set-path=/apple-mail http://127.0.0.1:8765 && "
         f"ln -sfn {shlex.quote(release_path)} "
         f"{shlex.quote(host.home + '/.local/share/peacockery/apple-mail/current')}"
@@ -114,6 +114,9 @@ def verify_mail_host(host: FleetHost, release_path: str | None) -> None:
         "set -eu;"
         "launchctl print gui/$(id -u)/studio.peacockery.apple-mail-mcp >/dev/null;"
         "launchctl print gui/$(id -u)/studio.peacockery.apple-mail-mcp-helper >/dev/null;"
+        "launchctl print gui/$(id -u)/studio.peacockery.apple-mail-ops >/dev/null;"
+        'test ! -e "$HOME/Library/LaunchAgents/'
+        'studio.peacockery.apple-mail-junk-flag-cleaner.plist";'
         "tailscale serve status | grep -F '/apple-mail proxy http://127.0.0.1:8765' >/dev/null;"
         f"grep -F {shlex.quote(expected)} "
         '"$HOME/Library/LaunchAgents/studio.peacockery.apple-mail-mcp.plist" >/dev/null;'

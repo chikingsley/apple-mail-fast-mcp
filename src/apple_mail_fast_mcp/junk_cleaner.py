@@ -5,13 +5,15 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .exceptions import MailMessageNotFoundError
 from .junk_campaigns import JunkCampaignStore, JunkMessage
 from .junk_health import DiscordWebhookNotifier, check_provider_health
+from .junk_incidents import RecoveryAgentDispatcher, RecoveryAgentPolicy
 from .junk_providers import PermanentDeleteError, ProviderAccount, build_purger
 from .mail_connector import AppleMailConnector
 
@@ -23,8 +25,10 @@ logger = logging.getLogger(__name__)
 JUNK_MAILBOX_NAMES = frozenset({"junk", "junk email", "spam"})
 FLAG_BATCH_SIZE = 100
 MAX_FLAG_BATCHES = 100
-DEFAULT_CONFIG = Path("~/.config/apple-mail-fast-mcp/junk-cleaner.json").expanduser()
+DEFAULT_CONFIG = Path("~/.config/apple-mail-fast-mcp/mail-ops.json").expanduser()
 DEFAULT_DATABASE = Path("~/.config/apple-mail-fast-mcp/junk-campaigns.sqlite3").expanduser()
+DEFAULT_STATUS = Path("~/.local/state/apple-mail-fast-mcp/ops-status.json").expanduser()
+DEFAULT_INCIDENTS = Path("~/.local/state/apple-mail-fast-mcp/incidents").expanduser()
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,7 @@ class JunkCleanerConfig:
     maximum_deletions_per_run: int
     providers: Mapping[str, ProviderAccount]
     notification_webhook_file: Path | None
+    recovery_agent: RecoveryAgentPolicy = field(default_factory=RecoveryAgentPolicy)
 
     @classmethod
     def load(cls, path: Path) -> JunkCleanerConfig:
@@ -69,6 +74,7 @@ class JunkCleanerConfig:
             notification_webhook_file=(
                 Path(webhook_value).expanduser() if webhook_value is not None else None
             ),
+            recovery_agent=RecoveryAgentPolicy.from_json(raw.get("recovery_agent")),
         )
         config.validate()
         return config
@@ -120,6 +126,11 @@ def _message_ids(messages: Sequence[dict[str, object]]) -> list[str]:
     return [message_id for message in messages if isinstance(message_id := message.get("id"), str)]
 
 
+def _result_count(result: Mapping[str, object], key: str) -> int:
+    value = result.get(key, 0)
+    return value if isinstance(value, int) else 0
+
+
 def clear_junk_flags(connector: AppleMailConnector, *, account: str, mailbox: str) -> int:
     """Clear all flags from messages already held in one junk mailbox."""
     total = 0
@@ -143,6 +154,8 @@ def _eligible_messages(
     store: JunkCampaignStore,
     messages: Sequence[JunkMessage],
     config: JunkCleanerConfig,
+    *,
+    flagged_connector_ids: set[str],
 ) -> list[JunkMessage]:
     if not messages:
         return []
@@ -155,8 +168,55 @@ def _eligible_messages(
     return [
         message
         for message in messages
-        if message.fingerprint.local_part in local_parts and not store.was_deleted(message)
+        if (
+            message.connector_id in flagged_connector_ids
+            or message.fingerprint.local_part in local_parts
+        )
+        and not store.was_deleted(message)
     ]
+
+
+def _process_candidates(
+    store: JunkCampaignStore,
+    candidates: Sequence[JunkMessage],
+    *,
+    config: JunkCleanerConfig,
+    provider: ProviderAccount,
+    source_home: Path,
+    deletions_remaining: int,
+) -> tuple[int, int, int, int]:
+    """Observe or delete one mailbox's bounded candidate set."""
+    reported = 0
+    deleted_total = 0
+    failed = 0
+    purger = None
+    for message in candidates[:deletions_remaining]:
+        if config.mode == "observe":
+            store.record_action(message, status="observed")
+            reported += 1
+            continue
+        try:
+            if purger is None:
+                purger = build_purger(
+                    provider,
+                    email_account=message.account,
+                    source_home=source_home,
+                )
+            deleted = purger.permanently_delete(message.rfc_message_id)
+            store.record_action(message, status="deleted", detail=f"provider copies: {deleted}")
+            deleted_total += deleted
+            deletions_remaining -= 1
+        except PermanentDeleteError as exc:
+            logger.error(
+                "Permanent junk deletion failed for %s/%s: %s",
+                message.account,
+                message.mailbox,
+                exc,
+            )
+            store.record_action(message, status="failed", detail=str(exc))
+            failed += 1
+            break
+    return reported, deleted_total, failed, deletions_remaining
 
 
 def clean_junk(
@@ -173,23 +233,26 @@ def clean_junk(
         if config.notification_webhook_file is not None
         else None
     )
-    provider_health = check_provider_health(
-        providers=config.providers,
-        store=store,
-        source_home=source_home,
-        notifier=notifier,
-    )
     results: list[dict[str, object]] = []
-    deletions_remaining = config.maximum_deletions_per_run
+    inventories: list[tuple[dict[str, object], JunkMailbox, list[JunkMessage], set[str]]] = []
     for junk_mailbox in junk_mailboxes(connector):
         account = junk_mailbox.provider_account
         mailbox = junk_mailbox.path
-        result: dict[str, object] = {"account": account, "mailbox": mailbox}
+        result: dict[str, object] = {
+            "account": account,
+            "mailbox": mailbox,
+            "qualified": 0,
+            "reported": 0,
+            "deleted": 0,
+            "failed": 0,
+        }
+        results.append(result)
         try:
             rows = connector.search_messages(
                 account=junk_mailbox.connector_account, mailbox=mailbox, limit=500
             )
             evidence = store.record_messages(account=account, mailbox=mailbox, messages=rows)
+            flagged_connector_ids = store.flagged_message_ids(account=account, mailbox=mailbox)
             result["messages_seen"] = len(rows)
             result["evidence_recorded"] = len(evidence)
             result["flags_cleared"] = clear_junk_flags(
@@ -199,42 +262,86 @@ def clean_junk(
             )
         except MailMessageNotFoundError:
             result["sync_retry"] = True
-            results.append(result)
             continue
+        inventories.append((result, junk_mailbox, evidence, flagged_connector_ids))
 
-        candidates = _eligible_messages(store, evidence, config)
+    provider_health = check_provider_health(
+        providers=config.providers,
+        store=store,
+        source_home=source_home,
+        notifier=notifier,
+    )
+    incident_dispatch_error = ""
+    try:
+        incidents = RecoveryAgentDispatcher(
+            policy=config.recovery_agent,
+            state_directory=DEFAULT_INCIDENTS,
+            source_directory=Path.cwd(),
+            webhook_file=config.notification_webhook_file,
+        ).dispatch(health=provider_health, providers=config.providers)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        logger.error("Recovery agent dispatch failed: %s", exc)
+        incidents = []
+        incident_dispatch_error = str(exc)[:500]
+    health_by_account = {str(row["account"]): row.get("healthy") is True for row in provider_health}
+    deletions_remaining = config.maximum_deletions_per_run
+    for result, junk_mailbox, evidence, flagged_connector_ids in inventories:
+        account = junk_mailbox.provider_account
+        candidates = _eligible_messages(
+            store,
+            evidence,
+            config,
+            flagged_connector_ids=flagged_connector_ids,
+        )
         result["qualified"] = len(candidates)
-        result["reported"] = 0
-        result["deleted"] = 0
-        result["failed"] = 0
         provider = config.providers.get(account)
         if provider is None:
             result["provider"] = "unconfigured"
-            results.append(result)
+            continue
+        if not health_by_account.get(account):
+            result["deferred"] = len(candidates)
             continue
 
-        purger = None
-        for message in candidates[:deletions_remaining]:
-            if config.mode == "observe":
-                store.record_action(message, status="observed")
-                result["reported"] = int(result["reported"]) + 1
-                continue
-            try:
-                if purger is None:
-                    purger = build_purger(provider, email_account=account, source_home=source_home)
-                deleted = purger.permanently_delete(message.rfc_message_id)
-                store.record_action(message, status="deleted", detail=f"provider copies: {deleted}")
-                result["deleted"] = int(result["deleted"]) + deleted
-                deletions_remaining -= 1
-            except PermanentDeleteError as exc:
-                logger.error("Permanent junk deletion failed for %s/%s: %s", account, mailbox, exc)
-                store.record_action(message, status="failed", detail=str(exc))
-                result["failed"] = int(result["failed"]) + 1
-        results.append(result)
+        reported, deleted_total, failed, deletions_remaining = _process_candidates(
+            store,
+            candidates,
+            config=config,
+            provider=provider,
+            source_home=source_home,
+            deletions_remaining=deletions_remaining,
+        )
+        result["reported"] = reported
+        result["deleted"] = deleted_total
+        result["failed"] = failed
+    stages = {
+        "capture_unflag": {
+            "success": all(result.get("sync_retry") is not True for result in results),
+            "mailboxes": len(results),
+            "flags_cleared": sum(_result_count(result, "flags_cleared") for result in results),
+        },
+        "provider_health": {
+            "success": all(result["healthy"] is True for result in provider_health),
+            "healthy": sum(result["healthy"] is True for result in provider_health),
+            "unhealthy": sum(result["healthy"] is False for result in provider_health),
+        },
+        "incident_recovery": {
+            "success": not incident_dispatch_error,
+            "dispatched": sum(incident.get("state") == "dispatched" for incident in incidents),
+        },
+        "deletion": {
+            "success": all(result["failed"] == 0 for result in results),
+            "deleted": sum(_result_count(result, "deleted") for result in results),
+            "deferred": sum(_result_count(result, "deferred") for result in results),
+            "failed": sum(_result_count(result, "failed") for result in results),
+        },
+    }
     return {
         "mode": config.mode,
         "database_path": str(database_path),
+        "stages": stages,
         "providers": provider_health,
+        "incidents": incidents,
+        "incident_dispatch_error": incident_dispatch_error,
         "mailboxes": results,
     }
 
@@ -242,21 +349,55 @@ def clean_junk(
 def main() -> int:
     """Execute one bounded scheduled-cleaner pass."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    started_at = datetime.now(UTC).isoformat()
     config_path = Path(os.environ.get("APPLE_MAIL_MCP_JUNK_CONFIG", DEFAULT_CONFIG)).expanduser()
     database_path = Path(
         os.environ.get("APPLE_MAIL_MCP_JUNK_DATABASE", DEFAULT_DATABASE)
     ).expanduser()
-    result = clean_junk(
-        AppleMailConnector(),
-        config=JunkCleanerConfig.load(config_path),
-        database_path=database_path,
-        source_home=Path.home(),
-    )
-    providers_healthy = all(row["healthy"] is True for row in result["providers"])
-    mailbox_operations_succeeded = all(row["failed"] == 0 for row in result["mailboxes"])
-    success = providers_healthy and mailbox_operations_succeeded
-    print(json.dumps({"success": success, **result}))
+    status_path = Path(os.environ.get("APPLE_MAIL_MCP_OPS_STATUS", DEFAULT_STATUS)).expanduser()
+    try:
+        result = clean_junk(
+            AppleMailConnector(),
+            config=JunkCleanerConfig.load(config_path),
+            database_path=database_path,
+            source_home=Path.home(),
+        )
+        providers_healthy = all(row["healthy"] is True for row in result["providers"])
+        mailbox_operations_succeeded = all(
+            row["failed"] == 0 and row.get("sync_retry") is not True for row in result["mailboxes"]
+        )
+        success = (
+            providers_healthy
+            and mailbox_operations_succeeded
+            and not result["incident_dispatch_error"]
+        )
+        status = {
+            "success": success,
+            "started_at": started_at,
+            "finished_at": datetime.now(UTC).isoformat(),
+            **result,
+        }
+    except Exception as exc:
+        logger.exception("Apple Mail operations supervisor failed")
+        success = False
+        status = {
+            "success": False,
+            "started_at": started_at,
+            "finished_at": datetime.now(UTC).isoformat(),
+            "fatal_error": str(exc)[:500],
+        }
+    _write_status(status_path, status)
+    print(json.dumps(status))
     return 0 if success else 1
+
+
+def _write_status(path: Path, status: dict[str, Any]) -> None:
+    """Atomically publish the complete latest-run status."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    Path(temporary).chmod(0o600)
+    temporary.replace(path)
 
 
 if __name__ == "__main__":

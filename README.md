@@ -1,6 +1,6 @@
 # Apple Mail MCP
 
-A private MCP service for reading, searching, drafting, sending, and managing email through Apple Mail on Hochi. The service is source-deployed with `uv`; it is not published to PyPI.
+A private MCP service for reading, searching, drafting, sending, and managing email through Apple Mail on Hochi. The service uses private source deployments with `uv`; PyPI distribution sits outside this project.
 
 ## How it works
 
@@ -26,18 +26,13 @@ Funnel must remain disabled.
 
 ## Install on the Mail host
 
-The supported Peacockery release path runs from a clean, pushed `main` checkout
-on GMK:
+The supported Peacockery release path runs from a clean, pushed `main` checkout on GMK:
 
 ```bash
 uv run apple-mail-fleet
 ```
 
-The fleet command creates an immutable Git-archive release on Hochi, installs
-the LaunchAgents from that release, preserves owner-only credentials, publishes
-the private Tailscale Serve path, configures each installed agent harness, and
-distributes the repository-owned Apple Mail skill across the fleet. It leaves
-existing development checkouts untouched.
+The fleet command creates an immutable Git-archive release on Hochi, installs the LaunchAgents from that release, preserves owner-only credentials, publishes the private Tailscale Serve path, configures each installed agent harness, and distributes the repository-owned Apple Mail skill across the fleet. It leaves existing development checkouts untouched.
 
 For direct development or recovery on the Mac, run:
 
@@ -45,7 +40,15 @@ For direct development or recovery on the Mac, run:
 ./scripts/install-macos-launch-agent.sh
 ```
 
-The installer creates or reuses a machine-local code-signing identity, performs a locked `uv` sync, builds and signs the native helper, validates secret-file permissions, installs both per-user LaunchAgents, restarts the service, and verifies Mail Automation. On first install, macOS asks for administrator authorization to trust the local signing certificate and asks whether the helper may control Mail. Approve both prompts once; later rebuilds retain the same signed identity.
+The release installs three explicit components: a resident signed AppleScript helper, a resident authenticated MCP service, and one five-minute operations supervisor that exits between runs. The supervisor captures and clears provider-supplied Junk flags before isolated provider health and permanent deletion stages. A provider failure can defer its own deletions while flag cleanup and every other account continue.
+
+Inspect the complete Apple Mail inventory, latest supervisor result, and every other user LaunchAgent on Hochi with:
+
+```bash
+uv run apple-mail-ops status
+```
+
+The installer creates or reuses a machine-local code-signing identity, performs a locked `uv` sync, builds and signs the native helper, validates secret-file permissions, installs the per-user LaunchAgents, restarts the services, and verifies Mail Automation. On first install, macOS asks for administrator authorization to trust the local signing certificate and asks whether the helper may control Mail. Approve both prompts once; later rebuilds retain the same signed identity.
 
 The current Peacockery deployment reads its IMAP password from `~/.config/apple-mail-fast-mcp/imap-password-peacockery` and its HTTP token from `~/.config/apple-mail-fast-mcp/http-bearer-token`. Both files must be owned by the current user and use mode `0400` or `0600`.
 
@@ -53,8 +56,7 @@ Set `APPLE_MAIL_MCP_LOCAL_DB=1` in the service environment to enable millisecond
 
 See [Private remote service on macOS](docs/guides/REMOTE_SERVICE.md) for Tailscale Serve, client configuration, logs, and verification commands.
 
-Use `uv run apple-mail-fleet --help` for scoped repair options such as
-`--local-only`, `--skip-deploy`, and `--skip-clients`.
+Use `uv run apple-mail-fleet --help` for scoped repair options such as `--local-only`, `--skip-deploy`, and `--skip-clients`.
 
 ## Run from source
 

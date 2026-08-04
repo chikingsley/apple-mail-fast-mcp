@@ -116,6 +116,7 @@ class JunkCampaignStore:
                 local_part TEXT NOT NULL,
                 domain TEXT NOT NULL,
                 rfc_message_id TEXT,
+                was_flagged INTEGER NOT NULL DEFAULT 0,
                 first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (account, mailbox, message_id)
@@ -149,6 +150,7 @@ class JunkCampaignStore:
         }
         for name, declaration in (
             ("rfc_message_id", "TEXT"),
+            ("was_flagged", "INTEGER NOT NULL DEFAULT 0"),
             ("last_seen_at", "TEXT NOT NULL DEFAULT ''"),
         ):
             if name not in columns:
@@ -164,9 +166,15 @@ class JunkCampaignStore:
         messages: Iterable[dict[str, object]],
     ) -> list[JunkMessage]:
         """Persist valid current-message evidence and return the normalized rows."""
+        message_rows = list(messages)
+        messages_by_id = {
+            message_id: message
+            for message in message_rows
+            if isinstance(message_id := message.get("id"), str)
+        }
         evidence = [
             normalized
-            for message in messages
+            for message in message_rows
             if (normalized := message_evidence(account=account, mailbox=mailbox, message=message))
             is not None
         ]
@@ -174,12 +182,16 @@ class JunkCampaignStore:
             connection.executemany(
                 """
                 INSERT INTO junk_campaign_observation
-                    (account, mailbox, message_id, rfc_message_id, local_part, domain, last_seen_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    (
+                        account, mailbox, message_id, rfc_message_id,
+                        local_part, domain, was_flagged, last_seen_at
+                    )
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT (account, mailbox, message_id) DO UPDATE SET
                     rfc_message_id = excluded.rfc_message_id,
                     local_part = excluded.local_part,
                     domain = excluded.domain,
+                    was_flagged = MAX(was_flagged, excluded.was_flagged),
                     last_seen_at = CURRENT_TIMESTAMP
                 """,
                 [
@@ -190,11 +202,24 @@ class JunkCampaignStore:
                         item.rfc_message_id,
                         item.fingerprint.local_part,
                         item.fingerprint.domain,
+                        int(messages_by_id[item.connector_id].get("flagged") is True),
                     )
                     for item in evidence
                 ],
             )
         return evidence
+
+    def flagged_message_ids(self, *, account: str, mailbox: str) -> set[str]:
+        """Return message ids durably observed with a sender/provider flag."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT message_id FROM junk_campaign_observation
+                WHERE account = ? AND mailbox = ? AND was_flagged = 1
+                """,
+                (account, mailbox),
+            ).fetchall()
+        return {str(row[0]) for row in rows}
 
     def qualified_local_parts(
         self,

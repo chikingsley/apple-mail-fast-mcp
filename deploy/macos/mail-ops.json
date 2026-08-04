@@ -5,6 +5,14 @@
   "observation_window_days": 30,
   "maximum_deletions_per_run": 25,
   "notification_webhook_file": "~/.config/apple-mail-fast-mcp/discord-webhook",
+  "recovery_agent": {
+    "enabled": true,
+    "cli": "opencode",
+    "model": "k2.6",
+    "effort": "default",
+    "mode": "edit",
+    "timeout_seconds": 900
+  },
   "providers": {
     "blackkingrussia@gmail.com": {"kind": "gmail"},
     "cheez2012@gmail.com": {"kind": "gmail"},

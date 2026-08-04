@@ -31,14 +31,17 @@ class CommandRunner(Protocol):
 
 def run_command(arguments: Sequence[str], *, environment: Mapping[str, str] | None = None) -> str:
     """Run one fixed-argument provider CLI call and return its JSON output."""
-    completed = subprocess.run(
-        list(arguments),
-        capture_output=True,
-        check=False,
-        env=dict(environment) if environment is not None else None,
-        text=True,
-        timeout=45,
-    )
+    try:
+        completed = subprocess.run(
+            list(arguments),
+            capture_output=True,
+            check=False,
+            env=dict(environment) if environment is not None else None,
+            text=True,
+            timeout=45,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise PermanentDeleteError("Provider command timed out after 45 seconds") from exc
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip() or "provider command failed"
         raise PermanentDeleteError(detail[:500])

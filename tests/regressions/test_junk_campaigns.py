@@ -71,6 +71,21 @@ def test_junk_regression_action_ledger_only_suppresses_completed_deletes(tmp_pat
     assert store.was_deleted(message) is True
 
 
+def test_junk_regression_flagged_eligibility_survives_local_unflag(tmp_path: Path) -> None:
+    """Regression: clearing a visible flag must preserve queued provider deletion evidence."""
+    store = JunkCampaignStore(tmp_path / "junk.sqlite3")
+    flagged = _message("flagged-1", "ordinary@campaign.example")
+    flagged["flagged"] = True
+    store.record_messages(account="mail@example.com", mailbox="Junk Email", messages=[flagged])
+
+    unflagged = {**flagged, "flagged": False}
+    store.record_messages(account="mail@example.com", mailbox="Junk Email", messages=[unflagged])
+
+    assert store.flagged_message_ids(account="mail@example.com", mailbox="Junk Email") == {
+        "flagged-1"
+    }
+
+
 def test_junk_regression_provider_health_preserves_transition_state(tmp_path: Path) -> None:
     """Regression: stale credentials must alert once and record later recovery."""
     store = JunkCampaignStore(tmp_path / "junk.sqlite3")

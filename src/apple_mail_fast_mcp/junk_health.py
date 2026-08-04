@@ -64,7 +64,12 @@ class DiscordWebhookNotifier:
         if recovered:
             accounts = ", ".join(f"`{account}`" for account in recovered)
             lines.append(f"Apple Mail provider access recovered: {accounts}.")
-        content = "\n".join(lines)
+        self.send_text("\n".join(lines))
+
+    def send_text(self, content: str) -> None:
+        """Deliver one bounded plain-text operational message."""
+        if not content.strip() or len(content) > 1800:
+            raise ValueError("Discord operational message must contain 1 to 1800 characters")
         request = Request(  # ruff: ignore[suspicious-url-open-usage] -- validated HTTPS
             self._webhook_url(),
             data=json.dumps({"content": content}).encode(),
@@ -107,9 +112,18 @@ def check_provider_health(
         previous = store.record_provider_health(account=account, healthy=healthy, detail=detail)
         transitioned = previous is not None and previous != healthy
         first_failure = previous is None and not healthy
+        transition = None
         if transitioned or first_failure:
             (recovered_transitions if healthy else failed_transitions).append(account)
-        results.append({"account": account, "healthy": healthy, "detail": detail})
+            transition = "recovered" if healthy else "failed"
+        results.append(
+            {
+                "account": account,
+                "healthy": healthy,
+                "detail": detail,
+                "transition": transition,
+            }
+        )
     if notifier is not None and (failed_transitions or recovered_transitions):
         try:
             notifier.notify(failed=failed_transitions, recovered=recovered_transitions)
