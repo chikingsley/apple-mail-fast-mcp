@@ -80,8 +80,13 @@ def test_junk_regression_gmail_health_check_reads_expected_profile() -> None:
 def test_junk_regression_microsoft_restores_active_named_connection(tmp_path: Path) -> None:
     """Regression: a scheduled delete must restore the user's active M365 connection."""
     connections = [
-        {"name": "personal", "active": False, "accessTokens": {}},
-        {"name": "work", "active": True, "accessTokens": {}},
+        {
+            "name": "personal",
+            "connectedAs": "mail@outlook.com",
+            "active": False,
+            "accessTokens": {},
+        },
+        {"name": "work", "connectedAs": "work@example.com", "active": True, "accessTokens": {}},
     ]
     runner = RecordingRunner(
         [json.dumps(connections), "", json.dumps({"value": [{"id": "graph-1"}]}), "", ""]
@@ -106,8 +111,8 @@ def test_junk_regression_microsoft_restores_active_named_connection(tmp_path: Pa
 def test_junk_regression_microsoft_health_check_uses_named_connection(tmp_path: Path) -> None:
     """Regression: Microsoft token expiry must surface before a deletion is attempted."""
     connections = [
-        {"name": "personal", "active": False},
-        {"name": "work", "active": True},
+        {"name": "personal", "connectedAs": "mail@outlook.com", "active": False},
+        {"name": "work", "connectedAs": "work@example.com", "active": True},
     ]
     profile = {"userPrincipalName": "mail@outlook.com", "mail": "mail@outlook.com"}
     runner = RecordingRunner([json.dumps(connections), "", json.dumps(profile), ""])
@@ -124,6 +129,24 @@ def test_junk_regression_microsoft_health_check_uses_named_connection(tmp_path: 
     assert select_call[0][select_call[0].index("--name") + 1] == "personal"
     assert profile_call[0][3].endswith("?$select=userPrincipalName,mail")
     assert restore_call[0][restore_call[0].index("--name") + 1] == "work"
+
+
+def test_junk_regression_disconnected_microsoft_identity_fails_before_graph(tmp_path: Path) -> None:
+    """Regression: an empty CLI identity must trigger auth recovery without a timeout."""
+    runner = RecordingRunner(
+        [json.dumps([{"name": "personal", "connectedAs": "", "active": True}])]
+    )
+    purger = MicrosoftPurger(
+        connection_name="personal",
+        m365_path="/usr/bin/m365",
+        source_home=tmp_path,
+        runner=runner,
+    )
+
+    with pytest.raises(PermanentDeleteError, match="authentication required"):
+        purger.check_health(expected_email="mail@outlook.com")
+
+    assert len(runner.calls) == 1
 
 
 def test_junk_regression_standard_imap_deletes_exact_junk_message() -> None:

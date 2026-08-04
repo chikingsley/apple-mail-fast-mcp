@@ -202,16 +202,28 @@ class MicrosoftPurger:
                 raise PermanentDeleteError("Microsoft 365 connection inventory is invalid") from exc
             if not isinstance(connections, list):
                 raise PermanentDeleteError("Microsoft 365 connection inventory is invalid")
-            available = {row.get("name") for row in connections if isinstance(row, dict)}
+            target = next(
+                (
+                    row
+                    for row in connections
+                    if isinstance(row, dict) and row.get("name") == self.connection_name
+                ),
+                None,
+            )
             active_names = [
                 row.get("name")
                 for row in connections
                 if isinstance(row, dict) and row.get("active") is True
             ]
             original = active_names[0] if active_names else None
-            if self.connection_name not in available:
+            if target is None:
                 raise PermanentDeleteError(
                     f"Microsoft 365 connection is missing: {self.connection_name}"
+                )
+            connected_as = target.get("connectedAs")
+            if not isinstance(connected_as, str) or not connected_as.strip():
+                raise PermanentDeleteError(
+                    f"Microsoft authentication required for connection: {self.connection_name}"
                 )
             changed = original != self.connection_name
             try:
