@@ -7,11 +7,13 @@ import json
 import os
 import plistlib
 import shutil
+import socket
 import subprocess
 from pathlib import Path
 from typing import Any
 
-from .junk_cleaner import DEFAULT_CONFIG, DEFAULT_STATUS, JunkCleanerConfig
+from .auth_recovery import run_authentication_recovery
+from .junk_cleaner import DEFAULT_CONFIG, DEFAULT_RECOVERIES, DEFAULT_STATUS, JunkCleanerConfig
 from .junk_cleaner import main as run_supervisor
 from .junk_health import DiscordWebhookNotifier
 
@@ -97,9 +99,7 @@ def status_payload() -> dict[str, Any]:
             latest_run = value
     current = Path.home() / ".local/share/peacockery/apple-mail/current"
     return {
-        "host": subprocess.run(
-            ["/bin/hostname"], capture_output=True, check=True, text=True, timeout=5
-        ).stdout.strip(),
+        "host": socket.gethostname(),
         "current_release": str(current.resolve()) if current.exists() else None,
         "managed_services": [
             {"label": label, "role": role, **_launchctl_state(label)}
@@ -158,11 +158,38 @@ def main() -> int:
     status_parser.add_argument("--json", action="store_true", dest="as_json")
     notify_parser = subparsers.add_parser("notify", help="send a bounded Discord incident update")
     notify_parser.add_argument("--message", required=True)
+    recover_parser = subparsers.add_parser(
+        "recover", help="run one deterministic provider-authentication recovery"
+    )
+    recover_parser.add_argument("--account", required=True)
+    recover_parser.add_argument("--recovery-id", required=True)
     args = parser.parse_args()
     if args.command == "run":
         return run_supervisor()
     if args.command == "notify":
         return _notify(args.message)
+    if args.command == "recover":
+        config_path = Path(
+            os.environ.get("APPLE_MAIL_MCP_JUNK_CONFIG", DEFAULT_CONFIG)
+        ).expanduser()
+        config = JunkCleanerConfig.load(config_path)
+        if config.notification_webhook_file is None:
+            raise RuntimeError("The Apple Mail operations Discord webhook is unavailable")
+        timeout_seconds = int(
+            os.environ.get(
+                "APPLE_MAIL_AUTH_RECOVERY_TIMEOUT",
+                str(config.authentication_recovery.timeout_seconds),
+            )
+        )
+        return run_authentication_recovery(
+            account=args.account,
+            recovery_id=args.recovery_id,
+            providers=config.providers,
+            state_directory=DEFAULT_RECOVERIES,
+            webhook_file=config.notification_webhook_file,
+            source_home=Path.home(),
+            timeout_seconds=timeout_seconds,
+        )
     payload = status_payload()
     if args.as_json:
         print(json.dumps(payload, indent=2, sort_keys=True))

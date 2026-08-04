@@ -59,7 +59,7 @@ class DiscordWebhookNotifier:
             accounts = ", ".join(f"`{account}`" for account in failed)
             lines.append(
                 "Apple Mail provider authentication requires renewal: "
-                f"{accounts}. Ask the active mail agent to complete the provider approval."
+                f"{accounts}. The operations supervisor recorded the account-specific failure."
             )
         if recovered:
             accounts = ", ".join(f"`{account}`" for account in recovered)

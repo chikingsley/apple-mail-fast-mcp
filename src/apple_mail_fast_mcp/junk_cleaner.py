@@ -10,10 +10,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .auth_recovery import AuthenticationRecoveryDispatcher, AuthenticationRecoveryPolicy
 from .exceptions import MailMessageNotFoundError
 from .junk_campaigns import JunkCampaignStore, JunkMessage
 from .junk_health import DiscordWebhookNotifier, check_provider_health
-from .junk_incidents import RecoveryAgentDispatcher, RecoveryAgentPolicy
 from .junk_providers import PermanentDeleteError, ProviderAccount, build_purger
 from .mail_connector import AppleMailConnector
 
@@ -28,7 +28,7 @@ MAX_FLAG_BATCHES = 100
 DEFAULT_CONFIG = Path("~/.config/apple-mail-fast-mcp/mail-ops.json").expanduser()
 DEFAULT_DATABASE = Path("~/.config/apple-mail-fast-mcp/junk-campaigns.sqlite3").expanduser()
 DEFAULT_STATUS = Path("~/.local/state/apple-mail-fast-mcp/ops-status.json").expanduser()
-DEFAULT_INCIDENTS = Path("~/.local/state/apple-mail-fast-mcp/incidents").expanduser()
+DEFAULT_RECOVERIES = Path("~/.local/state/apple-mail-fast-mcp/auth-recovery").expanduser()
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,9 @@ class JunkCleanerConfig:
     maximum_deletions_per_run: int
     providers: Mapping[str, ProviderAccount]
     notification_webhook_file: Path | None
-    recovery_agent: RecoveryAgentPolicy = field(default_factory=RecoveryAgentPolicy)
+    authentication_recovery: AuthenticationRecoveryPolicy = field(
+        default_factory=AuthenticationRecoveryPolicy
+    )
 
     @classmethod
     def load(cls, path: Path) -> JunkCleanerConfig:
@@ -74,7 +76,9 @@ class JunkCleanerConfig:
             notification_webhook_file=(
                 Path(webhook_value).expanduser() if webhook_value is not None else None
             ),
-            recovery_agent=RecoveryAgentPolicy.from_json(raw.get("recovery_agent")),
+            authentication_recovery=AuthenticationRecoveryPolicy.from_json(
+                raw.get("authentication_recovery")
+            ),
         )
         config.validate()
         return config
@@ -271,18 +275,17 @@ def clean_junk(
         source_home=source_home,
         notifier=notifier,
     )
-    incident_dispatch_error = ""
+    recovery_dispatch_error = ""
     try:
-        incidents = RecoveryAgentDispatcher(
-            policy=config.recovery_agent,
-            state_directory=DEFAULT_INCIDENTS,
+        recoveries = AuthenticationRecoveryDispatcher(
+            policy=config.authentication_recovery,
+            state_directory=DEFAULT_RECOVERIES,
             source_directory=Path.cwd(),
-            webhook_file=config.notification_webhook_file,
         ).dispatch(health=provider_health, providers=config.providers)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
-        logger.error("Recovery agent dispatch failed: %s", exc)
-        incidents = []
-        incident_dispatch_error = str(exc)[:500]
+        logger.error("Authentication recovery dispatch failed: %s", exc)
+        recoveries = []
+        recovery_dispatch_error = str(exc)[:500]
     health_by_account = {str(row["account"]): row.get("healthy") is True for row in provider_health}
     deletions_remaining = config.maximum_deletions_per_run
     for result, junk_mailbox, evidence, flagged_connector_ids in inventories:
@@ -324,9 +327,9 @@ def clean_junk(
             "healthy": sum(result["healthy"] is True for result in provider_health),
             "unhealthy": sum(result["healthy"] is False for result in provider_health),
         },
-        "incident_recovery": {
-            "success": not incident_dispatch_error,
-            "dispatched": sum(incident.get("state") == "dispatched" for incident in incidents),
+        "authentication_recovery": {
+            "success": not recovery_dispatch_error,
+            "started": sum(recovery.get("state") == "starting" for recovery in recoveries),
         },
         "deletion": {
             "success": all(result["failed"] == 0 for result in results),
@@ -340,8 +343,8 @@ def clean_junk(
         "database_path": str(database_path),
         "stages": stages,
         "providers": provider_health,
-        "incidents": incidents,
-        "incident_dispatch_error": incident_dispatch_error,
+        "authentication_recoveries": recoveries,
+        "authentication_recovery_error": recovery_dispatch_error,
         "mailboxes": results,
     }
 
@@ -369,7 +372,7 @@ def main() -> int:
         success = (
             providers_healthy
             and mailbox_operations_succeeded
-            and not result["incident_dispatch_error"]
+            and not result["authentication_recovery_error"]
         )
         status = {
             "success": success,

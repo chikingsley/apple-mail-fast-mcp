@@ -28,7 +28,6 @@ fi
 
 command -v uv >/dev/null
 command -v launchctl >/dev/null
-command -v agent-cli >/dev/null
 
 if [[ ! -S "${APPLESCRIPT_HELPER_SOCKET}" || -L "${APPLESCRIPT_HELPER_SOCKET}" ]]; then
   echo "AppleScript helper socket is unavailable: ${APPLESCRIPT_HELPER_SOCKET}" >&2
