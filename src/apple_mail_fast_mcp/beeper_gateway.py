@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server import create_proxy
 from fastmcp.server.auth import StaticTokenVerifier
 
@@ -22,7 +23,16 @@ def main() -> None:
         label="service token",
     )
     proxy = create_proxy(
-        Client("http://127.0.0.1:23373/v0/mcp", auth=upstream_token, timeout=60),
+        Client(
+            StreamableHttpTransport(
+                "http://127.0.0.1:23373/v0/mcp",
+                auth=upstream_token,
+                # Tailscale's external HTTPS scheme must not change Beeper's
+                # local HTTP response route when proxy headers are forwarded.
+                headers={"x-forwarded-proto": "http"},
+            ),
+            timeout=60,
+        ),
         name="Beeper on Hochi",
         provider_error_strategy="raise",
         auth=StaticTokenVerifier(

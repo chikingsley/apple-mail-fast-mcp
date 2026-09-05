@@ -8,6 +8,7 @@ import plistlib
 import shutil
 import sqlite3
 import subprocess
+import time
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--ledger-source", type=Path)
@@ -31,7 +32,14 @@ def stop(label):
 
 def start(label):
     p = agents / f"{label}.plist"
-    subprocess.run(["launchctl", "bootstrap", domain, str(p)], check=True)
+    # launchd can briefly retain a booted-out label while its process exits.
+    for attempt in range(5):
+        result = subprocess.run(["launchctl", "bootstrap", domain, str(p)], capture_output=True)
+        if result.returncode == 0:
+            break
+        if attempt == 4:
+            result.check_returncode()
+        time.sleep(1)
     subprocess.run(
         ["launchctl", "print", f"{domain}/{label}"], stdout=subprocess.DEVNULL, check=True
     )
