@@ -945,10 +945,11 @@ class AppleMailConnector:
         for candidate in self.list_accounts():
             name = str(candidate.get("name") or "")
             account_id = str(candidate.get("id") or "")
-            if account in {name, account_id} and account_id:
-                self._local_db_account_ids[account] = account_id
+            if account_id:
+                self._local_db_account_ids[account_id] = account_id
                 self._local_db_account_ids[name] = account_id
-                return account_id
+        if account in self._local_db_account_ids:
+            return self._local_db_account_ids[account]
         raise MailAccountNotFoundError(f"Account not found: {account}")
 
     def _try_local_db_search(
@@ -2054,6 +2055,25 @@ class AppleMailConnector:
             if date_from is None or cutoff_date_iso > date_from:
                 date_from = cutoff_date_iso
 
+        local_result = self._try_local_db_search(
+            account=account,
+            mailbox=mailbox,
+            sender_contains=sender_contains,
+            subject_contains=subject_contains,
+            read_status=read_status,
+            is_flagged=is_flagged,
+            date_from=date_from,
+            date_to=date_to,
+            received_within_hours=received_within_hours,
+            has_attachment=has_attachment,
+            limit=limit,
+            include_attachments=include_attachments,
+            body_contains=body_contains,
+            text_contains=text_contains,
+        )
+        if local_result is not None:
+            return local_result
+
         if not self._imap_breaker_open(account):
             try:
                 result = self._imap_search(
@@ -2078,25 +2098,6 @@ class AppleMailConnector:
             except _IMAP_FALLBACK_EXCS as exc:
                 self._log_imap_fallback(account, exc)
                 # fall through to AppleScript
-
-        local_result = self._try_local_db_search(
-            account=account,
-            mailbox=mailbox,
-            sender_contains=sender_contains,
-            subject_contains=subject_contains,
-            read_status=read_status,
-            is_flagged=is_flagged,
-            date_from=date_from,
-            date_to=date_to,
-            received_within_hours=received_within_hours,
-            has_attachment=has_attachment,
-            limit=limit,
-            include_attachments=include_attachments,
-            body_contains=body_contains,
-            text_contains=text_contains,
-        )
-        if local_result is not None:
-            return local_result
 
         # We're committed to the AppleScript path. Warn proactively if a
         # body/text search is set — that's the multi-order-of-magnitude
@@ -2386,6 +2387,14 @@ class AppleMailConnector:
         Raises:
             MailMessageNotFoundError: Message not found via either path.
         """
+        if message_id.isdigit() and account is not None and mailbox is not None:
+            return self._get_message_applescript(
+                message_id,
+                include_content,
+                include_attachments,
+                account=account,
+                mailbox=mailbox,
+            )
         if account is not None and mailbox is not None and not self._imap_breaker_open(account):
             try:
                 result = self._imap_get_message(
@@ -2403,7 +2412,13 @@ class AppleMailConnector:
                 self._log_imap_fallback(account, exc)
                 # fall through to AppleScript
 
-        return self._get_message_applescript(message_id, include_content, include_attachments)
+        return self._get_message_applescript(
+            message_id,
+            include_content,
+            include_attachments,
+            account=account,
+            mailbox=mailbox,
+        )
 
     def _imap_get_message(
         self,
@@ -2438,6 +2453,9 @@ class AppleMailConnector:
         message_id: str,
         include_content: bool,
         include_attachments: bool = False,
+        *,
+        account: str | None = None,
+        mailbox: str | None = None,
     ) -> dict[str, Any]:
         """AppleScript fallback for get_message — iterates account × mailbox.
 
@@ -2489,7 +2507,19 @@ class AppleMailConnector:
         end tell
         """
 
-        script = _wrap_as_json_script(tell_body, timeout=self.timeout)
+        handlers = ""
+        if account is not None and mailbox is not None:
+            account_clause = applescript_account_clause(account)
+            mailbox_safe = escape_applescript_string(sanitize_input(mailbox))
+            tell_body = tell_body.replace(
+                "repeat with acc in accounts",
+                f"repeat with acc in {{{account_clause}}}",
+            ).replace(
+                "repeat with mb in mailboxes of acc",
+                f'repeat with mb in {{my resolveMailbox(acc, "{mailbox_safe}")}}',
+            )
+            handlers = _MAILBOX_RESOLVER_HANDLERS
+        script = _wrap_as_json_script(tell_body, timeout=self.timeout, handlers=handlers)
         result = self._run_applescript(script)
         return cast("dict[str, Any]", parse_applescript_json(result))
 

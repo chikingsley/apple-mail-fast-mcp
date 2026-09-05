@@ -217,7 +217,16 @@ private func handleClient(_ client: Int32) {
     return
   }
 
-  let result = execute(source)
+  let result: (status: UInt8, message: String)
+  if source.hasPrefix("SQL\n") {
+    do {
+      result = (successStatus, try queryEnvelopeIndex(String(source.dropFirst(4))))
+    } catch {
+      result = (errorStatus, String(describing: error))
+    }
+  } else {
+    result = execute(source)
+  }
   _ = writeAll(client, data: response(status: result.status, message: result.message))
 }
 

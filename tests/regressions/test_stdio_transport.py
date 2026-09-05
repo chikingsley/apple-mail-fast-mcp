@@ -23,6 +23,7 @@ from mcp.client.stdio import stdio_client
 pytestmark = pytest.mark.regression
 
 EXPECTED_TOOLS = {
+    "junk_status",
     # Discovery
     "list_accounts",
     "list_mailboxes",

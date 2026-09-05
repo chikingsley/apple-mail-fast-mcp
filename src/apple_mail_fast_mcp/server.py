@@ -20,6 +20,7 @@ from fastmcp.server.elicitation import AcceptedElicitation
 from pydantic import BeforeValidator
 
 from .cli import run_setup_imap
+from .code_mode import communications_code_mode
 from .drafts import DraftStateStore, SeedRecord
 from .exceptions import (
     MailAccountNotFoundError,
@@ -45,6 +46,7 @@ from .exceptions import (
     MailUnsupportedRuleActionError,
 )
 from .imap_connector import ImapConnectionPool
+from .junk_automation.index import JunkLedger
 from .local_db_connector import LocalDbConnector
 from .mail_connector import AppleMailConnector
 from .secret_file import SecretFileError, read_secret_file
@@ -164,8 +166,12 @@ def _build_local_db_connector() -> LocalDbConnector | None:
     if flag not in {"1", "true", "yes", "on"}:
         return None
     configured_path = os.getenv("APPLE_MAIL_MCP_LOCAL_DB_PATH", "").strip()
+    helper_socket = os.getenv("APPLE_MAIL_MCP_APPLESCRIPT_SOCKET", "").strip()
     logger.info("Local Apple Mail metadata accelerator enabled")
-    return LocalDbConnector(Path(configured_path) if configured_path else None)
+    return LocalDbConnector(
+        Path(configured_path) if configured_path else None,
+        helper_socket=Path(helper_socket) if helper_socket and not configured_path else None,
+    )
 
 
 def _attachment_cap_overrides() -> dict[str, int]:
@@ -1111,7 +1117,12 @@ def search_messages(
         if safety_err:
             return safety_err
 
-        rate_err = check_rate_limit("search_messages", {"account": account, "mailbox": mailbox})
+        operation = (
+            "search_messages"
+            if body_contains or text_contains or include_attachments or has_attachment is not None
+            else "search_metadata"
+        )
+        rate_err = check_rate_limit(operation, {"account": account, "mailbox": mailbox})
         if rate_err:
             return rate_err
 
@@ -3461,6 +3472,12 @@ def delete_draft(draft_id: str) -> dict[str, Any]:
         return {"success": False, "error": str(e), "error_type": "unknown"}
 
 
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
+def junk_status() -> dict[str, Any]:
+    """Read the latest completed cleaner cycle and cumulative Junk ledger status."""
+    return JunkLedger().status()
+
+
 def _port_arg(value: str) -> int:
     """Argparse type for ``--port``: an integer in the valid TCP range."""
     try:
@@ -3561,6 +3578,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "server entry in your MCP client to batch-approve reads while "
             "still gating writes per call. See docs/reference/TOOLS.md."
         ),
+    )
+    parser.add_argument(
+        "--code-mode",
+        action="store_true",
+        help="Expose search, get_schema and bounded execute while retaining all tools",
     )
     parser.add_argument(
         "--transport",
@@ -3677,6 +3699,8 @@ def main(argv: list[str] | None = None) -> int:
             cli_port=args.port,
         )
 
+    if args.code_mode:
+        mcp.add_transform(communications_code_mode())
     if _READ_ONLY:
         logger.info(
             "Read-only mode: 14 mutating tools skipped (--read-only). "

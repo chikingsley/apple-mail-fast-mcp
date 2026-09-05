@@ -114,12 +114,14 @@ def validate_bulk_operation(item_count: int, max_items: int = 100) -> tuple[bool
 
 
 TIER_LIMITS: dict[str, tuple[int, float]] = {
+    "metadata_reads": (300, 60.0),
     "cheap_reads": (60, 60.0),
     "expensive_ops": (20, 60.0),
     "sends": (3, 60.0),
 }
 
 OPERATION_TIERS: dict[str, str] = {
+    "search_metadata": "metadata_reads",
     "list_accounts": "cheap_reads",
     "list_rules": "cheap_reads",
     "list_mailboxes": "cheap_reads",

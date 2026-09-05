@@ -10,12 +10,12 @@ Complete reference for all MCP tools provided by the Apple Mail MCP server.
 
 Every tool ships with the per-tool annotations the MCP 2025-03 spec defines so hosts that honor them can group / batch-approve permissions. Hosts that ignore the hints get the same behavior they always did — annotations are forward-compatible.
 
-| Hint | What it means | Defaults |
-|---|---|---|
-| `readOnlyHint` | `true` if the tool only reads state; `false` if it can mutate Mail.app, the filesystem, or remote IMAP state. | always set explicitly |
+| Hint              | What it means                                                                                                                                     | Defaults              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| `readOnlyHint`    | `true` if the tool only reads state; `false` if it can mutate Mail.app, the filesystem, or remote IMAP state.                                     | always set explicitly |
 | `destructiveHint` | `true` if the tool can remove or overwrite existing state (delete, move, rename, replace). `false` for purely additive tools (create / save-new). | always set explicitly |
-| `idempotentHint` | `true` if calling the tool a second time with the same arguments leaves end state unchanged. | always set explicitly |
-| `openWorldHint` | Out of scope for v0.9.0 — unset; defaults to `true` per the spec. | n/a |
+| `idempotentHint`  | `true` if calling the tool a second time with the same arguments leaves end state unchanged.                                                      | always set explicitly |
+| `openWorldHint`   | Out of scope for v0.9.0 — unset; defaults to `true` per the spec.                                                                                 | n/a                   |
 
 **Classification:**
 
@@ -33,25 +33,26 @@ Search for messages matching specified criteria.
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `account` | string | Conditional | None | Account name (e.g., "Gmail", "iCloud"). Required when `source` is None; ignored when `source` is a list. |
-| `mailbox` | string | No | "INBOX" | Mailbox/folder name. Ignored when `source` is a list. |
-| `sender_contains` | string | No | None | Filter by sender email or domain |
-| `subject_contains` | string | No | None | Filter by subject keywords |
-| `read_status` | boolean | No | None | Filter by read status (true=read, false=unread) |
-| `is_flagged` | boolean | No | None | Filter by flagged status (true=flagged, false=not flagged) |
-| `date_from` | string | No | None | Inclusive lower bound on `date_received`. ISO 8601 YYYY-MM-DD. |
-| `date_to` | string | No | None | Inclusive upper bound on `date_received` (full day included). ISO 8601 YYYY-MM-DD. |
-| `received_within_hours` | integer | No | None | Relative-time filter — only return messages received within the last N hours. Hour precision (Mail.app evaluates the cutoff server-side on the AppleScript path; IMAP path day-floors via SINCE and Python post-filters). Composes with `date_from` / `date_to` — most restrictive filter wins. Must be `> 0`. Days = 24, weeks = 168. |
-| `has_attachment` | boolean | No | None | Filter messages with (true) or without (false) attachments |
-| `limit` | integer | No | 50 | Maximum number of results to return |
-| `source` | list[string] \| null | No | null | Optional list of message ids (with optional `"SELECTED"` sentinel) to scope the search to. `null` (default) searches the account/mailbox normally. |
-| `include_attachments` | boolean | No | false | When true, each row includes an `attachments` field with per-attachment metadata. Default off — opt-in because the AppleScript fallback path can be slow on cold caches (#142). Free on the IMAP fast path. |
-| `body_contains` | string | No | None | Substring match against message body content. IMAP: server-side `BODY` predicate (sub-second). AppleScript: per-message body read (very slow — see performance note). Case-insensitive. |
-| `text_contains` | string | No | None | Substring match against headers + body (RFC 3501 `TEXT`). IMAP: server-side `TEXT` predicate. AppleScript: matches `content + subject + sender` (recipients omitted). Same perf characteristics as `body_contains`. |
+| Parameter               | Type                 | Required    | Default | Description                                                                                                                                                                                                                                                                                                                            |
+| ----------------------- | -------------------- | ----------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `account`               | string               | Conditional | None    | Account name (e.g., "Gmail", "iCloud"). Required when `source` is None; ignored when `source` is a list.                                                                                                                                                                                                                               |
+| `mailbox`               | string               | No          | "INBOX" | Mailbox/folder name. Ignored when `source` is a list.                                                                                                                                                                                                                                                                                  |
+| `sender_contains`       | string               | No          | None    | Filter by sender email or domain                                                                                                                                                                                                                                                                                                       |
+| `subject_contains`      | string               | No          | None    | Filter by subject keywords                                                                                                                                                                                                                                                                                                             |
+| `read_status`           | boolean              | No          | None    | Filter by read status (true=read, false=unread)                                                                                                                                                                                                                                                                                        |
+| `is_flagged`            | boolean              | No          | None    | Filter by flagged status (true=flagged, false=not flagged)                                                                                                                                                                                                                                                                             |
+| `date_from`             | string               | No          | None    | Inclusive lower bound on `date_received`. ISO 8601 YYYY-MM-DD.                                                                                                                                                                                                                                                                         |
+| `date_to`               | string               | No          | None    | Inclusive upper bound on `date_received` (full day included). ISO 8601 YYYY-MM-DD.                                                                                                                                                                                                                                                     |
+| `received_within_hours` | integer              | No          | None    | Relative-time filter — only return messages received within the last N hours. Hour precision (Mail.app evaluates the cutoff server-side on the AppleScript path; IMAP path day-floors via SINCE and Python post-filters). Composes with `date_from` / `date_to` — most restrictive filter wins. Must be `> 0`. Days = 24, weeks = 168. |
+| `has_attachment`        | boolean              | No          | None    | Filter messages with (true) or without (false) attachments                                                                                                                                                                                                                                                                             |
+| `limit`                 | integer              | No          | 50      | Maximum number of results to return                                                                                                                                                                                                                                                                                                    |
+| `source`                | list[string] \| null | No          | null    | Optional list of message ids (with optional `"SELECTED"` sentinel) to scope the search to. `null` (default) searches the account/mailbox normally.                                                                                                                                                                                     |
+| `include_attachments`   | boolean              | No          | false   | When true, each row includes an `attachments` field with per-attachment metadata. Default off — opt-in because the AppleScript fallback path can be slow on cold caches (#142). Free on the IMAP fast path.                                                                                                                            |
+| `body_contains`         | string               | No          | None    | Substring match against message body content. IMAP: server-side `BODY` predicate (sub-second). AppleScript: per-message body read (very slow — see performance note). Case-insensitive.                                                                                                                                                |
+| `text_contains`         | string               | No          | None    | Substring match against headers + body (RFC 3501 `TEXT`). IMAP: server-side `TEXT` predicate. AppleScript: matches `content + subject + sender` (recipients omitted). Same perf characteristics as `body_contains`.                                                                                                                    |
 
 **Notes:**
+
 - Returns metadata-only rows (id, subject, sender, date_received, read_status, flagged). For full bodies, pipe the result ids into `get_messages([ids])`.
 - Malformed `date_from` / `date_to` raise `error_type: validation_error`. Only ISO 8601 YYYY-MM-DD is accepted; relative dates like "7 days ago" are not supported.
 - `has_attachment` is filtered after the initial server-side match because Mail.app rejects attachment predicates inside its `whose` clause.
@@ -104,6 +105,7 @@ When the call commits to the AppleScript path **and** a body/text filter is set,
 ```
 
 **Row fields:**
+
 - `id` — path-native: Mail.app internal numeric id when the AppleScript path runs, RFC 5322 Message-ID when the IMAP path runs. Fast for downstream same-path operations.
 - `rfc_message_id` — RFC 5322 Message-ID (bracketless), or `null` when the message lacks a Message-ID header. Always present, regardless of which path produced the row. Accepted by the IMAP fast paths in `update_message` / `delete_messages` (#149 / #150 / #151 / #152) — the dual-emit means cross-path consumers don't need to know which path generated their input.
 
@@ -148,7 +150,7 @@ search_messages(
 - `not_found`: Mailbox not found
 - `unknown`: Unexpected error occurred
 
----
+______________________________________________________________________
 
 ### get_messages
 
@@ -156,16 +158,17 @@ Retrieve full details of one or more messages, with bodies. Returns a list (alwa
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `message_ids` | list[string] | Yes | - | List of message ids to fetch. May include the literal token `"SELECTED"` (server-resolved to Mail.app's current UI selection at call time). Mixed lists like `["SELECTED", "12345"]` are valid. Empty list is a no-op. |
-| `include_content` | boolean | No | true | Include message bodies |
-| `headers_only` | boolean | No | false | IMAP fast-path optimization for explicit ids; ignored on AppleScript fallback |
-| `account` | string | No | None | Mail.app account name. With `mailbox`, activates the IMAP fast path for explicit ids (issue #72). Forward the account returned by `search_messages` when fetching its result ids. |
-| `mailbox` | string | No | None | Exact folder path for the IMAP fast path. Forward the mailbox returned by `search_messages`; Gmail system folders use full paths such as `[Gmail]/All Mail` and `[Gmail]/Trash`. |
-| `include_attachments` | boolean | No | true | When true, each message gains an `attachments: [{name, mime_type, size, downloaded}]` field. Default on for `get_messages` because id-list cardinality is bounded (typically 1-10) — cost is acceptable on both paths. |
+| Parameter             | Type         | Required | Default | Description                                                                                                                                                                                                            |
+| --------------------- | ------------ | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `message_ids`         | list[string] | Yes      | -       | List of message ids to fetch. May include the literal token `"SELECTED"` (server-resolved to Mail.app's current UI selection at call time). Mixed lists like `["SELECTED", "12345"]` are valid. Empty list is a no-op. |
+| `include_content`     | boolean      | No       | true    | Include message bodies                                                                                                                                                                                                 |
+| `headers_only`        | boolean      | No       | false   | IMAP fast-path optimization for explicit ids; ignored on AppleScript fallback                                                                                                                                          |
+| `account`             | string       | No       | None    | Mail.app account name. With `mailbox`, activates the IMAP fast path for explicit ids (issue #72). Forward the account returned by `search_messages` when fetching its result ids.                                      |
+| `mailbox`             | string       | No       | None    | Exact folder path for the IMAP fast path. Forward the mailbox returned by `search_messages`; Gmail system folders use full paths such as `[Gmail]/All Mail` and `[Gmail]/Trash`.                                       |
+| `include_attachments` | boolean      | No       | true    | When true, each message gains an `attachments: [{name, mime_type, size, downloaded}]` field. Default on for `get_messages` because id-list cardinality is bounded (typically 1-10) — cost is acceptable on both paths. |
 
 **Notes:**
+
 - Missing ids drop out silently — the response contains whatever was found (partial-results convention).
 - The `"SELECTED"` sentinel is resolved server-side via `mail.get_selected_messages()` at call time. Empty selection expands to nothing.
 - Pair with `search_messages` (metadata-only, criteria-based) and `get_thread` (thread member ids) to fetch bodies for specific messages.
@@ -219,7 +222,7 @@ get_messages(["abc@x"], account="iCloud", mailbox="INBOX", headers_only=True)
 
 - `unknown`: Unexpected error occurred
 
----
+______________________________________________________________________
 
 ### get_thread
 
@@ -227,9 +230,9 @@ Return all messages in the thread containing the given anchor message, sorted by
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `message_id` | string | Yes | - | Internal id of any message in the thread (from `search_messages` or `get_messages` results). |
+| Parameter    | Type   | Required | Default | Description                                                                                  |
+| ------------ | ------ | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `message_id` | string | Yes      | -       | Internal id of any message in the thread (from `search_messages` or `get_messages` results). |
 
 **Returns:**
 
@@ -269,10 +272,9 @@ full = get_messages(ids)
 - `message_not_found`: Anchor message doesn't exist or was deleted
 - `unknown`: Unexpected error occurred
 
----
+______________________________________________________________________
 
-
----
+______________________________________________________________________
 
 ### get_statistics
 
@@ -282,16 +284,16 @@ Stats are computed over at most `scan_limit` of the most recent messages in the 
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `account` | string | Yes | - | Account name (e.g. "Gmail"). |
-| `mailbox` | string | No | "INBOX" | Mailbox to summarize. |
-| `received_within_hours` | integer | No | 720 | Window size in hours (720 ≈ 30 days). |
-| `date_from` | string | No | None | ISO date lower bound (composes with the window). |
-| `date_to` | string | No | None | ISO date upper bound. |
-| `by` | string | No | "address" | Group top senders by `"address"` or `"domain"`. |
-| `top_senders_limit` | integer | No | 10 | How many top senders to return. |
-| `scan_limit` | integer | No | 500 | Max messages aggregated (bounds cost). |
+| Parameter               | Type    | Required | Default   | Description                                      |
+| ----------------------- | ------- | -------- | --------- | ------------------------------------------------ |
+| `account`               | string  | Yes      | -         | Account name (e.g. "Gmail").                     |
+| `mailbox`               | string  | No       | "INBOX"   | Mailbox to summarize.                            |
+| `received_within_hours` | integer | No       | 720       | Window size in hours (720 ≈ 30 days).            |
+| `date_from`             | string  | No       | None      | ISO date lower bound (composes with the window). |
+| `date_to`               | string  | No       | None      | ISO date upper bound.                            |
+| `by`                    | string  | No       | "address" | Group top senders by `"address"` or `"domain"`.  |
+| `top_senders_limit`     | integer | No       | 10        | How many top senders to return.                  |
+| `scan_limit`            | integer | No       | 500       | Max messages aggregated (bounds cost).           |
 
 **Returns:**
 
@@ -325,7 +327,7 @@ get_statistics(account="Gmail", by="domain", received_within_hours=168)
 
 - `unknown`: Unexpected error occurred
 
----
+______________________________________________________________________
 
 ### list_mailboxes
 
@@ -333,9 +335,9 @@ List all mailboxes (folders) for a specific account.
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `account` | string | Yes | - | Account name (e.g., "Gmail", "iCloud") |
+| Parameter | Type   | Required | Default | Description                            |
+| --------- | ------ | -------- | ------- | -------------------------------------- |
+| `account` | string | Yes      | -       | Account name (e.g., "Gmail", "iCloud") |
 
 **Returns:**
 
@@ -380,7 +382,7 @@ list_mailboxes(account="iCloud")
 - `account_not_found`: Account doesn't exist
 - `unknown`: Unexpected error occurred
 
----
+______________________________________________________________________
 
 ### update_message
 
@@ -388,16 +390,16 @@ Patch one or more messages: change read state, flag color, and/or move to anothe
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `message_ids` | list[string] | Yes | - | Up to 100 message IDs to update |
-| `read_status` | boolean \| null | No | null | `True` marks read, `False` marks unread, `null` leaves unchanged |
-| `flagged` | boolean \| null | No | null | `True` flags (red if no `flag_color` given — Mail.app's default flag color), `False` clears, `null` leaves unchanged |
-| `flag_color` | string \| null | No | null | One of `orange`, `red`, `yellow`, `blue`, `green`, `purple`, `gray`, `none`. `"none"` clears the flag. Implies `flagged=True` for non-`none` values. |
-| `destination_mailbox` | string \| null | No | null | Target mailbox name to move to. Requires `account`. |
-| `account` | string \| null | No | null | Account name (required when `destination_mailbox` is set; also unlocks the IMAP narrow-path optimization) |
-| `source_mailbox` | string \| null | No | null | Optional narrow-path hint — narrows the AppleScript scan to one mailbox. Required to unlock the IMAP fast path on move-only patches (#149) — without it, the move runs via AppleScript even when IMAP is configured. |
-| `gmail_mode` | boolean | No | false | **Deprecated and ignored (#364).** The move strategy is chosen automatically; this flag does nothing. Slated for removal at v1.0 (#369). |
+| Parameter             | Type            | Required | Default | Description                                                                                                                                                                                                          |
+| --------------------- | --------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `message_ids`         | list[string]    | Yes      | -       | Up to 100 message IDs to update                                                                                                                                                                                      |
+| `read_status`         | boolean \| null | No       | null    | `True` marks read, `False` marks unread, `null` leaves unchanged                                                                                                                                                     |
+| `flagged`             | boolean \| null | No       | null    | `True` flags (red if no `flag_color` given — Mail.app's default flag color), `False` clears, `null` leaves unchanged                                                                                                 |
+| `flag_color`          | string \| null  | No       | null    | One of `orange`, `red`, `yellow`, `blue`, `green`, `purple`, `gray`, `none`. `"none"` clears the flag. Implies `flagged=True` for non-`none` values.                                                                 |
+| `destination_mailbox` | string \| null  | No       | null    | Target mailbox name to move to. Requires `account`.                                                                                                                                                                  |
+| `account`             | string \| null  | No       | null    | Account name (required when `destination_mailbox` is set; also unlocks the IMAP narrow-path optimization)                                                                                                            |
+| `source_mailbox`      | string \| null  | No       | null    | Optional narrow-path hint — narrows the AppleScript scan to one mailbox. Required to unlock the IMAP fast path on move-only patches (#149) — without it, the move runs via AppleScript even when IMAP is configured. |
+| `gmail_mode`          | boolean         | No       | false   | **Deprecated and ignored (#364).** The move strategy is chosen automatically; this flag does nothing. Slated for removal at v1.0 (#369).                                                                             |
 
 > **Gmail label moves (#364).** The old `gmail_mode` copy+delete strategy silently routed Gmail INBOX→label moves through `[Gmail]/Trash` (stripping the destination label) and reported success anyway — data loss. It has been removed. Moves now run via IMAP `UID MOVE` when the account has IMAP configured (the reliable Gmail relabel); otherwise via a **verified** AppleScript `set mailbox`. If a move can't be confirmed (the Gmail silent-no-op), `update_message` returns `error_type: "imap_required"` instead of falsely succeeding — configure IMAP with `apple-mail-fast-mcp setup-imap --account <name>` and pass `source_mailbox`.
 
@@ -407,7 +409,7 @@ Patch one or more messages: change read state, flag color, and/or move to anothe
 
 **Performance — IMAP fast paths:**
 
-- **Move-only patches (#149):** When `destination_mailbox` is the only field set and `source_mailbox` is provided, the move runs server-side via IMAP `UID MOVE`. On a 47k-message Gmail INBOX this drops the move from ~57s to <1s. Falls back to AppleScript when the server lacks `MOVE` / `UIDPLUS`.
+- **Move-only patches (#149):** When `destination_mailbox` is the only field set and `source_mailbox` is provided, the move runs server-side via IMAP `UID MOVE`. On a 47k-message Gmail INBOX this drops the move from ~57s to \<1s. Falls back to AppleScript when the server lacks `MOVE` / `UIDPLUS`.
 - **Read-status-only patches (#151):** When `read_status` is the only field set and `account` + `source_mailbox` are provided, the read/unread mutation runs server-side via IMAP `UID STORE +/-FLAGS (\Seen)`. `\Seen` is base IMAP (RFC 3501), universal across all servers — no capability check needed.
 - **Flag-only patches (#152):** When `flagged` is the only field set (no `flag_color`) and `account` + `source_mailbox` are provided, the flag/unflag runs server-side via IMAP `UID STORE +/-FLAGS (\Flagged)`. Same base-IMAP universality as `\Seen`. Bare `\Flagged` renders identically in Mail.app to the existing AppleScript default flag (verified empirically, no UI divergence). **Caveat on unflag:** calling `flagged=False` via this path on a message that was previously color-flagged removes `\Flagged` but does NOT remove the `$MailFlagBit*` color keyword Mail.app set — standard IMAP clients show no flag, but Mail.app may resurface the color on next sync. To clean both: omit `source_mailbox` (forces AppleScript, which also clears `flag index`), or use `flag_color="none"` instead.
 
@@ -474,8 +476,7 @@ update_message(
 - `imap_required`: A move could not be confirmed via AppleScript (the Gmail silent-no-op) and the account has no IMAP configured (#364). Run `apple-mail-fast-mcp setup-imap --account <name>` and pass `source_mailbox`.
 - `unknown`: Unexpected error occurred
 
----
-
+______________________________________________________________________
 
 ## Error Handling
 
@@ -499,7 +500,7 @@ All tools return a consistent error format:
 - `cancelled`: User cancelled the operation
 - `unknown`: Unexpected error
 
----
+______________________________________________________________________
 
 ## Best Practices
 
@@ -519,7 +520,7 @@ all_messages = search_messages(account="Gmail", limit=10000)
 # ... filter in Python
 ```
 
-### Error Handling
+### Search error handling
 
 ```python
 # Always check success field
@@ -560,7 +561,7 @@ list_mailboxes(account="gmail")
 list_mailboxes(account="my gmail account")
 ```
 
----
+______________________________________________________________________
 
 ## Security Considerations
 
@@ -583,12 +584,11 @@ list_mailboxes(account="my gmail account")
 - Bulk operations limited to 100 items
 - Consider implementing additional rate limits for production use
 
----
+______________________________________________________________________
 
 ## Phase 2 Tools (v0.2.0)
 
-
----
+______________________________________________________________________
 
 ### save_attachments
 
@@ -596,13 +596,13 @@ Save attachments from a message to a directory.
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `message_id` | string | Yes | - | Message ID to save attachments from |
-| `save_directory` | string | Yes | - | Directory path to save attachments |
-| `attachment_indices` | list[int] | No | None | Specific attachment indices (None = all) |
-| `account` | string | No | None | Mail.app account name or UUID. With `mailbox`, takes the IMAP fast path (one fetch). Pass the same values you read the message with so attachment ordering matches. |
-| `mailbox` | string | No | None | Folder the message lives in (e.g. "INBOX"), used with `account` for the IMAP fast path. |
+| Parameter            | Type      | Required | Default | Description                                                                                                                                                         |
+| -------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `message_id`         | string    | Yes      | -       | Message ID to save attachments from                                                                                                                                 |
+| `save_directory`     | string    | Yes      | -       | Directory path to save attachments                                                                                                                                  |
+| `attachment_indices` | list[int] | No       | None    | Specific attachment indices (None = all)                                                                                                                            |
+| `account`            | string    | No       | None    | Mail.app account name or UUID. With `mailbox`, takes the IMAP fast path (one fetch). Pass the same values you read the message with so attachment ordering matches. |
+| `mailbox`            | string    | No       | None    | Folder the message lives in (e.g. "INBOX"), used with `account` for the IMAP fast path.                                                                             |
 
 **Performance (#371):** pass `account` + `mailbox` to fetch the message once over IMAP and write the bytes straight to disk. Without them, `save_attachments` falls back to an O(accounts × mailboxes) AppleScript scan whose unindexed `message id` lookup is ~20s/mailbox — on Gmail (dozens of labels) that can run for minutes and time out. Mirrors `get_attachment_content`'s fast path.
 
@@ -617,11 +617,7 @@ Save attachments from a message to a directory.
 }
 ```
 
-`saved` is the number of attachments written. `rejected` lists any attachments skipped by the byte
-caps (per-attachment default 100 MB, aggregate 500 MB per call — disk-fill DoS protection, #236),
-each as `{"name", "size", "reason"}` where reason is `per_attachment_cap` / `aggregate_cap` (pre-check)
-or `*_postwrite` (an oversized file deleted after writing). Override the caps with
-`APPLE_MAIL_MCP_MAX_ATTACHMENT_BYTES` / `APPLE_MAIL_MCP_MAX_TOTAL_ATTACHMENT_BYTES`.
+`saved` is the number of attachments written. `rejected` lists any attachments skipped by the byte caps (per-attachment default 100 MB, aggregate 500 MB per call — disk-fill DoS protection, #236), each as `{"name", "size", "reason"}` where reason is `per_attachment_cap` / `aggregate_cap` (pre-check) or `*_postwrite` (an oversized file deleted after writing). Override the caps with `APPLE_MAIL_MCP_MAX_ATTACHMENT_BYTES` / `APPLE_MAIL_MCP_MAX_TOTAL_ATTACHMENT_BYTES`.
 
 **Examples:**
 
@@ -641,12 +637,13 @@ save_attachments(
 ```
 
 **Security Notes:**
+
 - Directory must exist and be writable
 - Path traversal attacks prevented
 - Filenames sanitized for safety
 - Existing files will be overwritten
 
----
+______________________________________________________________________
 
 ### get_attachment_content
 
@@ -654,12 +651,12 @@ Read **one** attachment's content inline, without writing it to disk — for "tr
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `message_id` | string | Yes | - | Message id as returned by `search_messages` / `get_messages` (RFC 5322 Message-ID on the IMAP path, Mail's internal id on the AppleScript path). |
-| `attachment_index` | integer | Yes | - | **0-based** index into the message's attachments, in the same order `get_attachments` / `get_messages(include_attachments=True)` report. |
-| `account` | string \| null | No | null | Mail.app account name or UUID. Supply it (with `mailbox`) for the faster IMAP path; pass the same value you read the message with so ordering matches. |
-| `mailbox` | string \| null | No | null | Folder the message lives in (for the IMAP path). |
+| Parameter          | Type           | Required | Default | Description                                                                                                                                            |
+| ------------------ | -------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `message_id`       | string         | Yes      | -       | Message id as returned by `search_messages` / `get_messages` (RFC 5322 Message-ID on the IMAP path, Mail's internal id on the AppleScript path).       |
+| `attachment_index` | integer        | Yes      | -       | **0-based** index into the message's attachments, in the same order `get_attachments` / `get_messages(include_attachments=True)` report.               |
+| `account`          | string \| null | No       | null    | Mail.app account name or UUID. Supply it (with `mailbox`) for the faster IMAP path; pass the same value you read the message with so ordering matches. |
+| `mailbox`          | string \| null | No       | null    | Folder the message lives in (for the IMAP path).                                                                                                       |
 
 **Returns:**
 
@@ -696,7 +693,7 @@ if att["encoding"] == "text":
     print(att["content"])      # inspect inline
 ```
 
----
+______________________________________________________________________
 
 ### create_mailbox
 
@@ -704,11 +701,11 @@ Create a new mailbox/folder.
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `account` | string | Yes | - | Account name to create mailbox in |
-| `name` | string | Yes | - | Name of the new mailbox |
-| `parent_mailbox` | string | No | None | Parent mailbox for nesting (None = top-level) |
+| Parameter        | Type   | Required | Default | Description                                   |
+| ---------------- | ------ | -------- | ------- | --------------------------------------------- |
+| `account`        | string | Yes      | -       | Account name to create mailbox in             |
+| `name`           | string | Yes      | -       | Name of the new mailbox                       |
+| `parent_mailbox` | string | No       | None    | Parent mailbox for nesting (None = top-level) |
 
 **Returns:**
 
@@ -744,11 +741,12 @@ create_mailbox(account="Gmail", name="Q2", parent_mailbox="2024")
 ```
 
 **Security Notes:**
+
 - Mailbox names sanitized for safety
 - Path traversal attacks prevented
 - Special characters removed
 
----
+______________________________________________________________________
 
 ### update_mailbox
 
@@ -761,12 +759,12 @@ Rename and/or re-parent (move) an existing mailbox.
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `account` | string | Yes | - | Mail.app account name or UUID (from `list_accounts`) |
-| `name` | string | Yes | - | Current mailbox name. Slash-separated for nested mailboxes (e.g. `"Archive/2024"`) |
-| `new_name` | string | No | None | Replacement leaf name. `None` keeps the current leaf when moving. Path-traversal characters stripped via `sanitize_mailbox_name`. At least one of `new_name` / `new_parent` is required. |
-| `new_parent` | string | No | None | Destination parent path. `None` keeps current parent (rename-only). `""` (empty string) moves to top-level. Non-empty string moves under that path. |
+| Parameter    | Type   | Required | Default | Description                                                                                                                                                                              |
+| ------------ | ------ | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `account`    | string | Yes      | -       | Mail.app account name or UUID (from `list_accounts`)                                                                                                                                     |
+| `name`       | string | Yes      | -       | Current mailbox name. Slash-separated for nested mailboxes (e.g. `"Archive/2024"`)                                                                                                       |
+| `new_name`   | string | No       | None    | Replacement leaf name. `None` keeps the current leaf when moving. Path-traversal characters stripped via `sanitize_mailbox_name`. At least one of `new_name` / `new_parent` is required. |
+| `new_parent` | string | No       | None    | Destination parent path. `None` keeps current parent (rename-only). `""` (empty string) moves to top-level. Non-empty string moves under that path.                                      |
 
 **Returns:**
 
@@ -809,10 +807,7 @@ update_mailbox(
 # -> "A/B" becomes "C/Renamed"
 ```
 
-**Caveat — Gmail system labels:** Renaming or moving a Gmail folder under
-`[Gmail]/` (Drafts, Sent Mail, Trash, etc.) may not stick — Gmail's
-IMAP server may auto-restore the canonical name. User-created Gmail
-labels behave normally. Tracked as #164.
+**Caveat — Gmail system labels:** Renaming or moving a Gmail folder under `[Gmail]/` (Drafts, Sent Mail, Trash, etc.) may not stick — Gmail's IMAP server may auto-restore the canonical name. User-created Gmail labels behave normally. Tracked as #164.
 
 **Error Codes:**
 
@@ -823,25 +818,21 @@ labels behave normally. Tracked as #164.
 - `applescript_error`: Mail.app rejected a rename for an underlying reason.
 - `unknown`: Unexpected error.
 
----
+______________________________________________________________________
 
 ### delete_mailbox
 
-Delete a mailbox via IMAP. Mail.app's AppleScript dictionary doesn't
-expose a working delete primitive for mailboxes (verified by probe), so
-this operation requires IMAP credentials in Keychain (#73 opt-in flow).
+Delete a mailbox via IMAP. Mail.app's AppleScript dictionary doesn't expose a working delete primitive for mailboxes (verified by probe), so this operation requires IMAP credentials in Keychain (#73 opt-in flow).
 
-**Always elicits user confirmation** (destructive). Refuses non-empty
-mailboxes by default to prevent accidental data loss; pass
-`delete_messages=True` to cascade.
+**Always elicits user confirmation** (destructive). Refuses non-empty mailboxes by default to prevent accidental data loss; pass `delete_messages=True` to cascade.
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `account` | string | Yes | - | Mail.app account name or UUID |
-| `name` | string | Yes | - | Mailbox name. Slash-separated for nested. |
-| `delete_messages` | boolean | No | False | When False, refuses if the mailbox contains messages. When True, cascade-deletes the mailbox and its contents. |
+| Parameter         | Type    | Required | Default | Description                                                                                                    |
+| ----------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `account`         | string  | Yes      | -       | Mail.app account name or UUID                                                                                  |
+| `name`            | string  | Yes      | -       | Mailbox name. Slash-separated for nested.                                                                      |
+| `delete_messages` | boolean | No       | False   | When False, refuses if the mailbox contains messages. When True, cascade-deletes the mailbox and its contents. |
 
 **Returns:**
 
@@ -854,8 +845,7 @@ mailboxes by default to prevent accidental data loss; pass
 }
 ```
 
-`deleted_message_count` is 0 when the mailbox was empty; positive when
-`delete_messages=True` cascaded.
+`deleted_message_count` is 0 when the mailbox was empty; positive when `delete_messages=True` cascaded.
 
 **Examples:**
 
@@ -879,7 +869,7 @@ delete_mailbox(
 - `account_not_found`: `account` doesn't match any configured account.
 - `unknown`: Unexpected error.
 
----
+______________________________________________________________________
 
 ### delete_messages
 
@@ -887,12 +877,12 @@ Delete messages — always moves them to the account's Trash mailbox.
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `message_ids` | list[string] | Yes | - | List of message IDs to delete |
-| `permanent` | boolean | No | False | Reserved; currently a no-op. Passing `True` emits a `DeprecationWarning`. See [issue #111](https://github.com/s-morgan-jeffries/apple-mail-fast-mcp/issues/111). |
-| `account` | string \| null | No | null | Account name (or UUID). Pair with `source_mailbox` to narrow the scan and unlock the IMAP fast path (#150). |
-| `source_mailbox` | string \| null | No | null | Mailbox the messages live in. Required to unlock the IMAP fast path (#150) — without it, the delete runs via AppleScript even when IMAP is configured. Either alone (without `account`) raises `validation_error`. |
+| Parameter        | Type           | Required | Default | Description                                                                                                                                                                                                        |
+| ---------------- | -------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `message_ids`    | list[string]   | Yes      | -       | List of message IDs to delete                                                                                                                                                                                      |
+| `permanent`      | boolean        | No       | False   | Reserved; currently a no-op. Passing `True` emits a `DeprecationWarning`. See [issue #111](https://github.com/s-morgan-jeffries/apple-mail-fast-mcp/issues/111).                                                   |
+| `account`        | string \| null | No       | null    | Account name (or UUID). Pair with `source_mailbox` to narrow the scan and unlock the IMAP fast path (#150).                                                                                                        |
+| `source_mailbox` | string \| null | No       | null    | Mailbox the messages live in. Required to unlock the IMAP fast path (#150) — without it, the delete runs via AppleScript even when IMAP is configured. Either alone (without `account`) raises `validation_error`. |
 
 **Returns:**
 
@@ -920,26 +910,22 @@ delete_messages(
 )
 ```
 
-**Performance — IMAP fast path (#150):** When invoked with `account` and `source_mailbox`, the delete runs server-side via IMAP `UID MOVE` to the account's Trash folder. On a 47k-message Gmail INBOX this drops the operation from ~57s to <1s — the AppleScript path uses `whose message id is`, which is a linear scan against RFC 5322 Message-IDs. Trash folder is resolved via RFC 6154 SPECIAL-USE `\Trash`; falls back to conventional names (`Trash`, `[Gmail]/Trash`, `Deleted Messages`, `Deleted Items`). Capability fallback chain: `MOVE` → `UID COPY` + `UID STORE +FLAGS \Deleted` + `UID EXPUNGE` (UIDPLUS only) → AppleScript. Requires Keychain credentials per the IMAP setup flow (`apple-mail-fast-mcp setup-imap --account <name>`); falls back to AppleScript transparently when IMAP isn't configured or the server lacks both `MOVE` and `UIDPLUS`.
+**Performance — IMAP fast path (#150):** When invoked with `account` and `source_mailbox`, the delete runs server-side via IMAP `UID MOVE` to the account's Trash folder. On a 47k-message Gmail INBOX this drops the operation from ~57s to \<1s — the AppleScript path uses `whose message id is`, which is a linear scan against RFC 5322 Message-IDs. Trash folder is resolved via RFC 6154 SPECIAL-USE `\Trash`; falls back to conventional names (`Trash`, `[Gmail]/Trash`, `Deleted Messages`, `Deleted Items`). Capability fallback chain: `MOVE` → `UID COPY` + `UID STORE +FLAGS \Deleted` + `UID EXPUNGE` (UIDPLUS only) → AppleScript. Requires Keychain credentials per the IMAP setup flow (`apple-mail-fast-mcp setup-imap --account <name>`); falls back to AppleScript transparently when IMAP isn't configured or the server lacks both `MOVE` and `UIDPLUS`.
 
 **Note on `permanent`:**
 
 Mail.app's AppleScript dictionary exposes no path to permanent-delete that bypasses Trash. Calling `delete msg` always moves to the account's Trash; calling `delete` again on a message already in Trash is a no-op, and there is no `empty trash` command. The `permanent` parameter is preserved for API compatibility but currently has no effect; passing `True` raises a `DeprecationWarning` so the gap is visible. Track #111 for status.
 
 **Safety Notes:**
+
 - Bulk deletions limited to 100 messages for safety
 - All deletes are recoverable from the account's Trash mailbox until that mailbox is emptied (typically by Mail.app's per-account "empty trash" schedule, configurable in Mail's preferences)
 
----
+______________________________________________________________________
 
 ## Drafts Lifecycle (v0.7.0)
 
-The drafts lifecycle replaces the v0.6 send group (`send_email`,
-`send_email_with_attachments`, `reply_to_message`, `forward_message`)
-with three tools that match Mail.app's actual primitive: every outgoing
-message is a draft until you `send` it. Net surface: 4 → 3, with
-`update_draft` and `delete_draft` being net-new capabilities (deferred
-sends, edit-before-send, discard).
+The drafts lifecycle replaces the v0.6 send group (`send_email`, `send_email_with_attachments`, `reply_to_message`, `forward_message`) with three tools that match Mail.app's actual primitive: every outgoing message is a draft until you `send` it. Net surface: 4 → 3, with `update_draft` and `delete_draft` being net-new capabilities (deferred sends, edit-before-send, discard).
 
 ### create_draft
 
@@ -949,22 +935,22 @@ Create a draft (fresh, reply, or forward). Optionally send immediately.
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `reply_to` | string | No | None | Id of a message to reply to. Accepts either Mail's internal numeric id or an RFC 5322 Message-ID — pass the `id` field from any `search_messages` / `get_messages` row verbatim (#205). Mutually exclusive with `forward_of`. When set, `to`/`cc` recipients and `subject` are auto-derived (override by passing them explicitly). |
-| `forward_of` | string | No | None | Id of a message to forward. Accepts the same id forms as `reply_to`. Mutually exclusive with `reply_to`. `to` is required (recipient of the forward). |
-| `to` | array[string] | When fresh | None | Recipient list. For reply/forward: `None` keeps auto-derived; `[]` clears; populated list replaces. |
-| `cc` | array[string] | No | None | CC recipients (same semantics as `to` for reply/forward). |
-| `bcc` | array[string] | No | None | BCC recipients. |
-| `subject` | string | When fresh | None | Subject. For reply/forward, `None` keeps Mail's `Re:`/`Fwd:` prefix. |
-| `body` | string | No | "" | Body text. For reply/forward, a non-empty body **replaces** Mail's auto-quoted content (the auto-quote isn't readable from AppleScript before save). Empty body leaves Mail's auto-quote intact. |
-| `body_html` | string | No | None | Optional HTML body (#251). Builds a `multipart/alternative` draft (HTML + a plain-text alternative from `body`, or derived from the HTML when `body` is empty). **Requires IMAP credentials** for the account (built over the clean IMAP path; Mail's AppleScript path is plain-text only) and is **fresh-draft-only**: combining `body_html` with `send_now` or `reply_to`/`forward_of` is rejected (`validation_error`), and if IMAP can't engage the call fails with `html_requires_imap` rather than silently dropping the HTML. HTML is caller-trusted (not sanitized). |
-| `attachment_paths` | array[string] | No | None | List of file paths to attach. |
-| `reply_all` | boolean | No | False | For `reply_to` only — use `reply to all`. |
-| `template_name` | string | No | None | Optional template to render for `subject` + `body`. Caller-supplied `subject`/`body` override the rendered output. |
-| `template_vars` | object | No | None | Variables for the template renderer. Requires `template_name`. |
-| `from_account` | string | No | None | Mail.app account name or UUID. None = Mail's default. On a save-as-draft with exactly one enabled account, that account is adopted so the clean (no iOS quote bug) IMAP draft path can engage — it's Mail's default sender anyway, so the From is unchanged (#321). |
-| `send_now` | boolean | No | False | `False` saves as draft. `True` sends immediately and elicits confirmation. When the account has SMTP + IMAP credentials configured, the send goes out over a clean **SMTP** submission (#322) — a wrapper-free RFC 822 message — so sent mail avoids the iOS cite-blockquote (Mail.app bug FB11734014); it falls back to Mail's AppleScript send (which does apply the wrapper) when SMTP isn't available. Unlike a save-as-draft, a `send_now` with no `from_account` is **not** auto-resolved to the sole account (#321) — pass `from_account` to get the clean SMTP path. |
+| Parameter          | Type          | Required   | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------ | ------------- | ---------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reply_to`         | string        | No         | None    | Id of a message to reply to. Accepts either Mail's internal numeric id or an RFC 5322 Message-ID — pass the `id` field from any `search_messages` / `get_messages` row verbatim (#205). Mutually exclusive with `forward_of`. When set, `to`/`cc` recipients and `subject` are auto-derived (override by passing them explicitly).                                                                                                                                                                                                                                           |
+| `forward_of`       | string        | No         | None    | Id of a message to forward. Accepts the same id forms as `reply_to`. Mutually exclusive with `reply_to`. `to` is required (recipient of the forward).                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `to`               | array[string] | When fresh | None    | Recipient list. For reply/forward: `None` keeps auto-derived; `[]` clears; populated list replaces.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `cc`               | array[string] | No         | None    | CC recipients (same semantics as `to` for reply/forward).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `bcc`              | array[string] | No         | None    | BCC recipients.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `subject`          | string        | When fresh | None    | Subject. For reply/forward, `None` keeps Mail's `Re:`/`Fwd:` prefix.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `body`             | string        | No         | ""      | Body text. For reply/forward, a non-empty body **replaces** Mail's auto-quoted content (the auto-quote isn't readable from AppleScript before save). Empty body leaves Mail's auto-quote intact.                                                                                                                                                                                                                                                                                                                                                                             |
+| `body_html`        | string        | No         | None    | Optional HTML body (#251). Builds a `multipart/alternative` draft (HTML + a plain-text alternative from `body`, or derived from the HTML when `body` is empty). **Requires IMAP credentials** for the account (built over the clean IMAP path; Mail's AppleScript path is plain-text only) and is **fresh-draft-only**: combining `body_html` with `send_now` or `reply_to`/`forward_of` is rejected (`validation_error`), and if IMAP can't engage the call fails with `html_requires_imap` rather than silently dropping the HTML. HTML is caller-trusted (not sanitized). |
+| `attachment_paths` | array[string] | No         | None    | List of file paths to attach.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `reply_all`        | boolean       | No         | False   | For `reply_to` only — use `reply to all`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `template_name`    | string        | No         | None    | Optional template to render for `subject` + `body`. Caller-supplied `subject`/`body` override the rendered output.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `template_vars`    | object        | No         | None    | Variables for the template renderer. Requires `template_name`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `from_account`     | string        | No         | None    | Mail.app account name or UUID. None = Mail's default. On a save-as-draft with exactly one enabled account, that account is adopted so the clean (no iOS quote bug) IMAP draft path can engage — it's Mail's default sender anyway, so the From is unchanged (#321).                                                                                                                                                                                                                                                                                                          |
+| `send_now`         | boolean       | No         | False   | `False` saves as draft. `True` sends immediately and elicits confirmation. When the account has SMTP + IMAP credentials configured, the send goes out over a clean **SMTP** submission (#322) — a wrapper-free RFC 822 message — so sent mail avoids the iOS cite-blockquote (Mail.app bug FB11734014); it falls back to Mail's AppleScript send (which does apply the wrapper) when SMTP isn't available. Unlike a save-as-draft, a `send_now` with no `from_account` is **not** auto-resolved to the sole account (#321) — pass `from_account` to get the clean SMTP path. |
 
 **Returns:**
 
@@ -977,36 +963,13 @@ Create a draft (fresh, reply, or forward). Optionally send immediately.
 }
 ```
 
-`draft_id` is empty when sent (`send_now=True`); `sent_message_id` is
-reserved for future use. `details.from_account` is the account the draft
-was created under (including an auto-resolved one), or `""` when Mail's
-default was used.
+`draft_id` is empty when sent (`send_now=True`); `sent_message_id` is reserved for future use. `details.from_account` is the account the draft was created under (including an auto-resolved one), or `""` when Mail's default was used.
 
-A draft created via the clean IMAP path triggers an account sync so it
-appears in Mail.app's Drafts promptly; a brief lag can still remain since
-Mail controls the final UI refresh (#269).
+A draft created via the clean IMAP path triggers an account sync so it appears in Mail.app's Drafts promptly; a brief lag can still remain since Mail controls the final UI refresh (#269).
 
-**Warnings:** when a save-as-draft falls back to the AppleScript path
-(IMAP not configured, unreachable, no `from_account` and >1 account), the
-response includes an optional `warnings: list[str]` field noting the body
-may render as a blockquote on iOS Mail (Mail.app bug FB11734014, #245).
-The field is **omitted** on the clean path. Configure IMAP for the account
-(`apple-mail-fast-mcp setup-imap`) — or pass `from_account` — to avoid it.
+**Warnings:** when a save-as-draft falls back to the AppleScript path (IMAP not configured, unreachable, no `from_account` and >1 account), the response includes an optional `warnings: list[str]` field noting the body may render as a blockquote on iOS Mail (Mail.app bug FB11734014, #245). The field is **omitted** on the clean path. Configure IMAP for the account (`apple-mail-fast-mcp setup-imap`) — or pass `from_account` — to avoid it.
 
-**Send path (`send_now=True`, #322).** Historically every send went out via
-Mail's AppleScript `tell theMessage to send`, whose `content` setter wraps
-the body in the same FB11734014 cite-blockquote as the draft case — so sent
-mail could render as a quote on iOS too. When `from_account` is given and
-that account has SMTP + IMAP credentials, `create_draft` now submits a clean,
-wrapper-free RFC 822 message (the same `build_draft_mime` output as the draft
-path) directly over the account's **SMTP** server, reusing the account's IMAP
-app-password (no separate SMTP credential). It falls back to the AppleScript
-send when SMTP isn't configured/reachable. In test mode (`MAIL_TEST_MODE`),
-the SMTP path re-verifies every **resolved** recipient — including reply-all
-recipients derived inside the connector — against the reserved-domain
-allowlist at the transport boundary and refuses the send
-(`error_type: "safety_violation"`) on a violation, closing the #175 class of
-bypass for the new transport.
+**Send path (`send_now=True`, #322).** Historically every send went out via Mail's AppleScript `tell theMessage to send`, whose `content` setter wraps the body in the same FB11734014 cite-blockquote as the draft case — so sent mail could render as a quote on iOS too. When `from_account` is given and that account has SMTP + IMAP credentials, `create_draft` now submits a clean, wrapper-free RFC 822 message (the same `build_draft_mime` output as the draft path) directly over the account's **SMTP** server, reusing the account's IMAP app-password (no separate SMTP credential). It falls back to the AppleScript send when SMTP isn't configured/reachable. In test mode (`MAIL_TEST_MODE`), the SMTP path re-verifies every **resolved** recipient — including reply-all recipients derived inside the connector — against the reserved-domain allowlist at the transport boundary and refuses the send (`error_type: "safety_violation"`) on a violation, closing the #175 class of bypass for the new transport.
 
 **Examples:**
 
@@ -1050,32 +1013,27 @@ create_draft(
 - `cancelled`: User declined the elicitation prompt (when `send_now=True`).
 - `applescript_error`, `unknown`: Lower-level failures.
 
----
+______________________________________________________________________
 
 ### update_draft
 
-Update an existing draft. Implemented as **delete-and-recreate** —
-Mail.app forbids mutating saved drafts, so this tool reads the
-current state, deletes the draft, and creates a new one with the
-merged fields. Threading headers (for replies) and forward anchors
-are preserved via persisted seed metadata.
+Update an existing draft. Implemented as **delete-and-recreate** — Mail.app forbids mutating saved drafts, so this tool reads the current state, deletes the draft, and creates a new one with the merged fields. Threading headers (for replies) and forward anchors are preserved via persisted seed metadata.
 
-**⚠️ Returns a NEW `draft_id`** — the input id is no longer valid
-after this call. Callers caching the id must re-read the response.
+**⚠️ Returns a NEW `draft_id`** — the input id is no longer valid after this call. Callers caching the id must re-read the response.
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `draft_id` | string | Yes | - | Mail.app id of the existing draft. |
-| `to` / `cc` / `bcc` | array[string] | No | None | Override recipient groups: `None` keeps existing, `[]` clears, populated list replaces. |
-| `subject` | string | No | None | Override subject. `None` keeps existing. |
-| `body` | string | No | None | Override body. `None` keeps existing; non-None replaces (including `""`). |
-| `body_html` | string | No | None | Optional HTML body for the recreated draft (#251); see `create_draft`. Requires IMAP credentials; limited to fresh-seed drafts (not reply/forward) and `send_now=False`. **Not auto-preserved:** because update is delete-and-recreate and draft state captures only plain text, existing HTML is dropped unless `body_html` is passed again. |
-| `attachment_paths` | array[string] | No | None | Override attachments: `None` **preserves existing** (extracted to a temp dir and re-attached); `[]` clears; populated list replaces. |
-| `template_name` / `template_vars` | string / object | No | None | Optional template render. User-supplied `subject`/`body` override the rendered output. |
-| `from_account` | string | No | None | Override sender. |
-| `send_now` | boolean | No | False | `False` saves new draft. `True` sends after eliciting confirmation. |
+| Parameter                         | Type            | Required | Default | Description                                                                                                                                                                                                                                                                                                                                   |
+| --------------------------------- | --------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `draft_id`                        | string          | Yes      | -       | Mail.app id of the existing draft.                                                                                                                                                                                                                                                                                                            |
+| `to` / `cc` / `bcc`               | array[string]   | No       | None    | Override recipient groups: `None` keeps existing, `[]` clears, populated list replaces.                                                                                                                                                                                                                                                       |
+| `subject`                         | string          | No       | None    | Override subject. `None` keeps existing.                                                                                                                                                                                                                                                                                                      |
+| `body`                            | string          | No       | None    | Override body. `None` keeps existing; non-None replaces (including `""`).                                                                                                                                                                                                                                                                     |
+| `body_html`                       | string          | No       | None    | Optional HTML body for the recreated draft (#251); see `create_draft`. Requires IMAP credentials; limited to fresh-seed drafts (not reply/forward) and `send_now=False`. **Not auto-preserved:** because update is delete-and-recreate and draft state captures only plain text, existing HTML is dropped unless `body_html` is passed again. |
+| `attachment_paths`                | array[string]   | No       | None    | Override attachments: `None` **preserves existing** (extracted to a temp dir and re-attached); `[]` clears; populated list replaces.                                                                                                                                                                                                          |
+| `template_name` / `template_vars` | string / object | No       | None    | Optional template render. User-supplied `subject`/`body` override the rendered output.                                                                                                                                                                                                                                                        |
+| `from_account`                    | string          | No       | None    | Override sender.                                                                                                                                                                                                                                                                                                                              |
+| `send_now`                        | boolean         | No       | False   | `False` saves new draft. `True` sends after eliciting confirmation.                                                                                                                                                                                                                                                                           |
 
 **Returns:**
 
@@ -1088,10 +1046,7 @@ after this call. Callers caching the id must re-read the response.
 }
 ```
 
-**Externally-created drafts:** for drafts not created via `create_draft`,
-seed recovery falls back to scanning Mail.app for the draft's
-`In-Reply-To` header — this can take 30s+ on large mailboxes. Forward
-seeds without persisted state are misclassified as fresh.
+**Externally-created drafts:** for drafts not created via `create_draft`, seed recovery falls back to scanning Mail.app for the draft's `In-Reply-To` header — this can take 30s+ on large mailboxes. Forward seeds without persisted state are misclassified as fresh.
 
 **Examples:**
 
@@ -1114,18 +1069,17 @@ update_draft(draft_id="161055", body="Final version", send_now=True)
 - `draft_not_found`: `draft_id` doesn't match any existing draft.
 - `invalid_draft_id`: `draft_id` failed validation (path traversal, etc.).
 
----
+______________________________________________________________________
 
 ### delete_draft
 
-Move a draft to Trash. One-way discard for the lifecycle; Mail.app no
-longer treats trashed drafts as editable.
+Move a draft to Trash. One-way discard for the lifecycle; Mail.app no longer treats trashed drafts as editable.
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `draft_id` | string | Yes | - | Mail.app id of the draft. |
+| Parameter  | Type   | Required | Default | Description               |
+| ---------- | ------ | -------- | ------- | ------------------------- |
+| `draft_id` | string | Yes      | -       | Mail.app id of the draft. |
 
 **Returns:**
 
@@ -1138,7 +1092,7 @@ longer treats trashed drafts as editable.
 - `draft_not_found`: `draft_id` doesn't match any existing draft.
 - `invalid_draft_id`: `draft_id` failed validation.
 
----
+______________________________________________________________________
 
 ## Tool Combinations
 
@@ -1182,7 +1136,7 @@ create_draft(
 )
 ```
 
----
+______________________________________________________________________
 
 ## Phase 4 Tools (v0.5.0)
 
@@ -1211,7 +1165,7 @@ List all Mail.app rules. Returns each rule's 1-based positional index, name, and
 - `name`: Rule display name. **Not guaranteed unique** — Mail.app allows multiple rules with the same name. Use `index`, not `name`, for unambiguous addressing.
 - `enabled`: Reflects the rule's toggle in Mail.app's Rules preferences.
 
----
+______________________________________________________________________
 
 ### create_rule
 
@@ -1243,7 +1197,7 @@ create_rule(
 )
 ```
 
----
+______________________________________________________________________
 
 ### update_rule
 
@@ -1270,7 +1224,7 @@ Patch a rule's properties. Only the fields you pass are changed. Also serves as 
 - **`conditions` cannot be replaced.** Mail.app on macOS Tahoe (16.0 / macOS 26) has a recursion bug in `-[MFMessageRule(Applescript) removeFromCriteriaAtIndex:]`: any AppleScript path that removes a rule condition (delete by index, delete every, or assignment of a new list) crashes Mail. `update_rule` raises `MailUnsupportedRuleActionError` if `conditions=` is passed. To change a rule's conditions, delete it with `delete_rule` and recreate with `create_rule`.
 - Rules whose existing actions include unsupported types (`run AppleScript`, `redirect message`, `play sound`, `notify`, `reply text`, color-message highlights) raise `MailUnsupportedRuleActionError` to avoid clobbering settings outside our schema.
 
----
+______________________________________________________________________
 
 ### delete_rule
 
@@ -1288,7 +1242,7 @@ Delete a rule by index.
 {"success": true, "rule_index": 7, "name": "File OmniFocus replies"}
 ```
 
----
+______________________________________________________________________
 
 ### list_accounts
 
@@ -1329,26 +1283,19 @@ first_enabled = next(a for a in accounts["accounts"] if a["enabled"])
 list_mailboxes(first_enabled["name"])
 ```
 
----
+______________________________________________________________________
 
 ## Email Templates (v0.5.0)
 
-Store and reuse common reply / forward / send bodies. Templates live as
-plain-text files on disk that you can edit in any editor; the tools
-provide a programmatic CRUD layer plus a render step that does
-placeholder substitution and pulls reply-context fields out of a
-referenced message.
+Store and reuse common reply / forward / send bodies. Templates live as plain-text files on disk that you can edit in any editor; the tools provide a programmatic CRUD layer plus a render step that does placeholder substitution and pulls reply-context fields out of a referenced message.
 
 ### Storage
 
-Templates are files at `~/.apple_mail_mcp/templates/<name>.md`. Override
-the location with the `APPLE_MAIL_MCP_HOME` environment variable
-(`templates/` is appended automatically). The directory is created on
-first save.
+Templates are files at `~/.apple_mail_mcp/templates/<name>.md`. Override the location with the `APPLE_MAIL_MCP_HOME` environment variable (`templates/` is appended automatically). The directory is created on first save.
 
 ### File format
 
-```
+```text
 subject: Re: {original_subject}
 
 Hi {recipient_name},
@@ -1356,31 +1303,24 @@ Hi {recipient_name},
 Thanks for reaching out.
 ```
 
-The optional header block (`key: value` lines) is terminated by a blank
-line; everything after is the body. The only recognized header in v1 is
-`subject:`. Placeholders use Python `str.format` syntax: `{name}`. To
-include a literal brace, double it: `{{` / `}}`.
+The optional header block (`key: value` lines) is terminated by a blank line; everything after is the body. The only recognized header in v1 is `subject:`. Placeholders use Python `str.format` syntax: `{name}`. To include a literal brace, double it: `{{` / `}}`.
 
 ### Placeholder substitution
 
-`render_template` returns the rendered subject (or null) and body. The
-following variables are auto-populated:
+`render_template` returns the rendered subject (or null) and body. The following variables are auto-populated:
 
-| Variable | When | Source |
-|----------|------|--------|
-| `today` | always | Current date, ISO format `YYYY-MM-DD` |
-| `recipient_name` | when `message_id` provided | Display name parsed from the original sender |
-| `recipient_email` | when `message_id` provided | Email parsed from the original sender |
-| `original_subject` | when `message_id` provided | The original message's subject |
+| Variable           | When                       | Source                                       |
+| ------------------ | -------------------------- | -------------------------------------------- |
+| `today`            | always                     | Current date, ISO format `YYYY-MM-DD`        |
+| `recipient_name`   | when `message_id` provided | Display name parsed from the original sender |
+| `recipient_email`  | when `message_id` provided | Email parsed from the original sender        |
+| `original_subject` | when `message_id` provided | The original message's subject               |
 
-User-supplied `vars` always override auto-fills on conflict. Any
-placeholder that's neither auto-populated nor user-supplied raises
-`MailTemplateMissingVariableError` listing every unfilled name.
+User-supplied `vars` always override auto-fills on conflict. Any placeholder that's neither auto-populated nor user-supplied raises `MailTemplateMissingVariableError` listing every unfilled name.
 
 ### list_templates
 
-List all stored templates. Returns each template's name and subject
-(may be null).
+List all stored templates. Returns each template's name and subject (may be null).
 
 ```json
 {
@@ -1395,8 +1335,7 @@ List all stored templates. Returns each template's name and subject
 
 ### get_template
 
-Read a single template by name. Returns name, subject (may be null),
-body, and the sorted list of placeholders found across subject + body.
+Read a single template by name. Returns name, subject (may be null), body, and the sorted list of placeholders found across subject + body.
 
 ```json
 {
@@ -1410,8 +1349,7 @@ body, and the sorted list of placeholders found across subject + body.
 
 ### save_template
 
-Create or overwrite a template. Returns `created: true` for new
-templates, `created: false` when an existing template was overwritten.
+Create or overwrite a template. Returns `created: true` for new templates, `created: false` when an existing template was overwritten.
 
 ```python
 save_template(
@@ -1421,10 +1359,7 @@ save_template(
 )
 ```
 
-No confirmation prompt — additive (or self-overwrite, which is the
-explicit intent of an idempotent save). Names must match
-`^[a-zA-Z0-9_-]{1,64}$`; anything outside that range (spaces, slashes,
-dots, oversized) raises `invalid_template_name`.
+No confirmation prompt — additive (or self-overwrite, which is the explicit intent of an idempotent save). Names must match `^[a-zA-Z0-9_-]{1,64}$`; anything outside that range (spaces, slashes, dots, oversized) raises `invalid_template_name`.
 
 ### delete_template
 
@@ -1436,10 +1371,7 @@ Remove a template by name. **Elicits user confirmation** before deleting.
 
 ### render_template
 
-Render a template into ready-to-send text. **No side effects** — the
-caller passes the rendered subject + body to `create_draft` to send.
-For most workflows, use `create_draft(template_name=...)` directly,
-which folds rendering into the send call.
+Render a template into ready-to-send text. **No side effects** — the caller passes the rendered subject + body to `create_draft` to send. For most workflows, use `create_draft(template_name=...)` directly, which folds rendering into the send call.
 
 ```python
 # Inline render-then-send (one tool call):
@@ -1457,11 +1389,9 @@ rendered = render_template(
 # rendered = {"success": True, "subject": "...", "body": "...", "used_vars": {...}}
 ```
 
-User-supplied `vars` override auto-fills. Missing placeholders return
-`missing_template_variable` error. Bad message IDs surface as
-`message_not_found`.
+User-supplied `vars` override auto-fills. Missing placeholders return `missing_template_variable` error. Bad message IDs surface as `message_not_found`.
 
----
+______________________________________________________________________
 
 ## API Stability
 
@@ -1472,3 +1402,7 @@ User-supplied `vars` override auto-fills. Missing placeholders return
 - **Phase 5+**: Further enhancements, backward compatible
 
 Breaking changes will only occur in major versions (1.0.0, 2.0.0, etc.).
+
+### junk_status
+
+Returns the latest completed Junk cleaner cycle and cumulative observations and actions. It reads the same durable ledger as the standalone cleaner. It does not run a cleanup cycle or erase Trash.

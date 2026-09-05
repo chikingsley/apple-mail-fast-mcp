@@ -1,17 +1,18 @@
 [project]
 name = "apple-mail-fast-mcp"
-version = "0.10.2"
+version = "0.11.0"
 description = "Private MCP access to Apple Mail"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "fastmcp>=3.3.1",
+    "fastmcp[code-mode]==4.0.3",
     "imapclient>=3.1.0",
     "uvicorn>=0.51.0",
 ]
 
 [project.scripts]
 apple-mail-fast-mcp = "apple_mail_fast_mcp.server:main"
+beeper-gateway = "apple_mail_fast_mcp.beeper_gateway:main"
 apple-mail-fleet = "apple_mail_fast_mcp.fleet:main"
 apple-mail-ops = "apple_mail_fast_mcp.ops_cli:main"
 apple-mail-install = "apple_mail_fast_mcp.macos_install:main"

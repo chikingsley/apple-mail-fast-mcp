@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -102,7 +103,7 @@ def test_issue_376_local_db_filters_account_mailbox_and_metadata(tmp_path: Path)
 
     assert rows == [
         {
-            "id": "101",
+            "id": "1",
             "rfc_message_id": "build@example.com",
             "subject": "Build completed",
             "sender": "App Store Connect <no_reply@email.apple.com>",
@@ -120,7 +121,7 @@ def test_issue_376_local_db_matches_encoded_nested_mailbox(tmp_path: Path) -> No
 
     rows = _search(LocalDbConnector(index), mailbox="[Gmail]/Spam")
 
-    assert [row["id"] for row in rows] == ["102"]
+    assert [row["id"] for row in rows] == ["2"]
 
 
 def test_issue_376_local_db_defers_content_queries(tmp_path: Path) -> None:
@@ -130,6 +131,17 @@ def test_issue_376_local_db_defers_content_queries(tmp_path: Path) -> None:
 
     with pytest.raises(LocalDbUnsupportedQueryError):
         _search(LocalDbConnector(index), body_contains="approval")
+
+
+def test_metadata_audit_does_not_match_mailbox_suffixes(tmp_path: Path) -> None:
+    """Regression: the September audit found suffix matching crossed folder boundaries."""
+    index = tmp_path / "Envelope Index"
+    _create_envelope_index(index)
+    with closing(sqlite3.connect(index)) as connection, connection:
+        connection.execute(
+            "UPDATE mailboxes SET url='imap://ACCOUNT-UUID/OtherINBOX' WHERE ROWID=1"
+        )
+    assert _search(LocalDbConnector(index), mailbox="INBOX") == []
 
 
 def test_issue_376_mail_connector_uses_local_db_before_applescript() -> None:

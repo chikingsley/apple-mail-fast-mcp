@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from .metadata_bridge import query_metadata
+
 
 class LocalDbUnavailableError(RuntimeError):
     """Apple Mail's local metadata database is unavailable or incompatible."""
@@ -38,7 +40,7 @@ _REQUIRED_COLUMNS: dict[str, set[str]] = {
 }
 
 _BASE_SQL = """
-SELECT m.message_id AS id,
+SELECT m.ROWID AS id,
        g.message_id_header AS rfc,
        s.subject AS subject,
        a.address AS sender,
@@ -92,7 +94,7 @@ def _mailbox_url_patterns(account_id: str, mailbox: str) -> list[str]:
         quote(mailbox, safe="/"),
         quote(mailbox, safe="/[]"),
     }
-    return [f"{account_prefix}%{_escape_like(value.lower())}" for value in variants]
+    return [f"{account_prefix}{_escape_like(value.lower())}" for value in variants]
 
 
 def _format_sender(name: str | None, address: str | None) -> str:
@@ -103,7 +105,7 @@ def _format_sender(name: str | None, address: str | None) -> str:
     return clean_address or clean_name
 
 
-def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
+def _row_to_message(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     timestamp = row["date_received"]
     received = (
         datetime.fromtimestamp(timestamp, tz=UTC).isoformat()
@@ -125,8 +127,11 @@ def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
 class LocalDbConnector:
     """Read Apple Mail metadata from its live SQLite database in read-only mode."""
 
-    def __init__(self, index_path: Path | None = None) -> None:
+    def __init__(
+        self, index_path: Path | None = None, *, helper_socket: Path | None = None
+    ) -> None:
         self._index_path = index_path
+        self._helper_socket = helper_socket
         self._schema_checked = False
 
     @property
@@ -247,7 +252,11 @@ class LocalDbConnector:
             params.append(limit)
 
         try:
+            if self._helper_socket is not None:
+                return [
+                    _row_to_message(row) for row in query_metadata(self._helper_socket, sql, params)
+                ]
             with closing(self._connect()) as connection:
                 return [_row_to_message(row) for row in connection.execute(sql, params)]
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, OSError, RuntimeError, ValueError) as exc:
             raise LocalDbUnavailableError(f"Apple Mail metadata query failed: {exc}") from exc
