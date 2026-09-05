@@ -47,7 +47,12 @@ def save(path, data):
         name = path.relative_to(home).as_posix().replace("/", "__")
         shutil.copy2(path, backup / name)
     temp = path.with_name(path.name + ".communications-tmp")
-    with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+    with os.fdopen(
+        os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
+        "w",
+        encoding="utf-8",
+        newline="\n",
+    ) as f:
         f.write(data)
     temp.replace(path)
 
