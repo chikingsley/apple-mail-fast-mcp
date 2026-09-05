@@ -3475,7 +3475,21 @@ def delete_draft(draft_id: str) -> dict[str, Any]:
 @_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def junk_status() -> dict[str, Any]:
     """Read the latest completed cleaner cycle and cumulative Junk ledger status."""
-    return JunkLedger().status()
+    status = JunkLedger().status()
+    # The internal ledger also includes every blacklist entry and its evidence;
+    # a routine health check needs counts, not the entire historical dataset.
+    return {
+        key: status[key]
+        for key in (
+            "latest",
+            "observed_messages",
+            "acted_messages",
+            "flag_evidence_messages",
+            "blacklisted_senders",
+            "blacklisted_domains",
+            "junk_mailboxes",
+        )
+    }
 
 
 def _port_arg(value: str) -> int:
