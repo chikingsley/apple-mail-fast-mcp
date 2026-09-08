@@ -674,6 +674,46 @@ def _wrap_with_timeout(body: str, *, timeout: int) -> str:
     return f"with timeout of {timeout} seconds\n{body}\nend timeout\n"
 
 
+def _attachment_metadata_clause() -> str:
+    """Preserve a readable message when Mail rejects an attachment property."""
+    fields = []
+    for field, property_name in (
+        ("name", "name"),
+        ("mime_type", "MIME type"),
+        ("size", "file size"),
+        ("downloaded", "downloaded"),
+    ):
+        fields.append(f'''
+            try
+                set attValue to {property_name} of att
+                if attValue is missing value then error "Attachment property unavailable" number -1728
+                set attRecord to attRecord & {{|{field}|:attValue}}
+            on error errText number errNumber
+                set end of attachmentErrors to {{|index|:attIndex, |field|:"{field}", |error|:errText, |code|:errNumber}}
+            end try
+''')
+    return (
+        """
+        set attList to {}
+        set attachmentErrors to {}
+        set attIndex to 0
+        try
+            repeat with att in mail attachments of msg
+                set attRecord to {|index|:attIndex}
+"""
+        + "".join(fields)
+        + """
+                set end of attList to attRecord
+                set attIndex to attIndex + 1
+            end repeat
+        on error errText number errNumber
+            set end of attachmentErrors to {|index|:attIndex, |field|:"enumeration", |error|:errText, |code|:errNumber}
+        end try
+        set attachmentsComplete to ((count of attachmentErrors) is 0)
+"""
+    )
+
+
 def _wrap_as_json_script(body: str, *, timeout: int, handlers: str = "") -> str:
     """Wrap a tell-block body with ASObjC imports and an NSJSONSerialization return.
 
@@ -2295,13 +2335,8 @@ class AppleMailConnector:
         effective_limit = str(limit) if limit else "999999999"
 
         if include_attachments:
-            attachments_clause = """
-                    set attList to {}
-                    repeat with att in mail attachments of msg
-                        set attRecord to {|name|:(name of att), |mime_type|:(MIME type of att), |size|:(file size of att), |downloaded|:(downloaded of att)}
-                        set end of attList to attRecord
-                    end repeat"""
-            attachments_field = ", |attachments|:attList"
+            attachments_clause = _attachment_metadata_clause()
+            attachments_field = ", |attachments|:attList, |attachment_errors|:attachmentErrors, |attachments_complete|:attachmentsComplete"
         else:
             attachments_clause = ""
             attachments_field = ""
@@ -2473,14 +2508,8 @@ class AppleMailConnector:
         )
 
         if include_attachments:
-            attachments_clause = """
-                        set attList to {}
-                        repeat with att in mail attachments of msg
-                            set attRecord to {|name|:(name of att), |mime_type|:(MIME type of att), |size|:(file size of att), |downloaded|:(downloaded of att)}
-                            set end of attList to attRecord
-                        end repeat
-"""
-            attachments_field = ", |attachments|:attList"
+            attachments_clause = _attachment_metadata_clause()
+            attachments_field = ", |attachments|:attList, |attachment_errors|:attachmentErrors, |attachments_complete|:attachmentsComplete"
         else:
             attachments_clause = ""
             attachments_field = ""
@@ -2490,13 +2519,18 @@ class AppleMailConnector:
             set resultData to missing value
             repeat with acc in accounts
                 repeat with mb in mailboxes of acc
+                    set msg to missing value
                     try
                         set msg to first message of mb whose ({id_match_clause})
+                    on error errText number errNumber
+                        if errNumber is not -1728 then error errText number errNumber
+                    end try
+                    if msg is not missing value then
                         {content_clause}
 {attachments_clause}
                         set resultData to {{|id|:(id of msg as text), |rfc_message_id|:(message id of msg), |subject|:(subject of msg), |sender|:(sender of msg), |date_received|:(date received of msg as text), |read_status|:(read status of msg), |flagged|:(flagged status of msg), |content|:msgContent{attachments_field}}}
                         exit repeat
-                    end try
+                    end if
                 end repeat
                 if resultData is not missing value then exit repeat
             end repeat
@@ -2649,7 +2683,12 @@ class AppleMailConnector:
         Raises:
             MailMessageNotFoundError: Message not found via either path.
         """
-        if account is not None and mailbox is not None and not self._imap_breaker_open(account):
+        if (
+            not message_id.isdecimal()
+            and account is not None
+            and mailbox is not None
+            and not self._imap_breaker_open(account)
+        ):
             try:
                 result = self._imap_get_attachments(
                     account=account,
@@ -2662,7 +2701,7 @@ class AppleMailConnector:
                 self._log_imap_fallback(account, exc)
                 # fall through to AppleScript
 
-        return self._get_attachments_applescript(message_id)
+        return self._get_attachments_applescript(message_id, account=account, mailbox=mailbox)
 
     def _imap_get_attachments(
         self,
@@ -2714,7 +2753,12 @@ class AppleMailConnector:
             MailAttachmentIndexError: ``attachment_index`` out of range.
             MailAttachmentTooLargeError: attachment exceeds the inline cap.
         """
-        if account is not None and mailbox is not None and not self._imap_breaker_open(account):
+        if (
+            not message_id.isdecimal()
+            and account is not None
+            and mailbox is not None
+            and not self._imap_breaker_open(account)
+        ):
             try:
                 result = self._imap_get_attachment_content(
                     account=account,
@@ -2728,7 +2772,9 @@ class AppleMailConnector:
                 self._log_imap_fallback(account, exc)
                 # fall through to AppleScript
 
-        return self._get_attachment_content_applescript(message_id, attachment_index)
+        return self._get_attachment_content_applescript(
+            message_id, attachment_index, account=account, mailbox=mailbox
+        )
 
     def _imap_get_attachment_content(
         self,
@@ -2769,12 +2815,19 @@ class AppleMailConnector:
         }
 
     def _get_attachment_content_applescript(
-        self, message_id: str, attachment_index: int
+        self,
+        message_id: str,
+        attachment_index: int,
+        *,
+        account: str | None = None,
+        mailbox: str | None = None,
     ) -> dict[str, Any]:
         """AppleScript path: enumerate metadata, validate index + size, then
         save the one attachment to a temp dir and read it back.
         """
-        attachments = self._get_attachments_applescript(message_id)
+        attachments = self._get_attachments_applescript(
+            message_id, account=account, mailbox=mailbox
+        )
         if not 0 <= attachment_index < len(attachments):
             raise MailAttachmentIndexError(
                 f"attachment_index {attachment_index} out of range: message "
@@ -2790,7 +2843,9 @@ class AppleMailConnector:
 
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / (sanitize_filename(name) or "attachment")
-            self._save_one_attachment_applescript(message_id, attachment_index + 1, dest)
+            self._save_one_attachment_applescript(
+                message_id, attachment_index + 1, dest, account=account, mailbox=mailbox
+            )
             if not dest.is_file():
                 raise MailMessageNotFoundError(
                     f"Could not read attachment {attachment_index} of message {message_id!r}."
@@ -2805,7 +2860,13 @@ class AppleMailConnector:
         }
 
     def _save_one_attachment_applescript(
-        self, message_id: str, one_based_index: int, dest_path: Path
+        self,
+        message_id: str,
+        one_based_index: int,
+        dest_path: Path,
+        *,
+        account: str | None = None,
+        mailbox: str | None = None,
     ) -> None:
         """Save a single attachment (1-based AppleScript index) to
         ``dest_path`` via Mail.app's ``save`` command. Factored out so the
@@ -2819,18 +2880,36 @@ class AppleMailConnector:
             f"""tell application "Mail"
             repeat with acc in accounts
                 repeat with mb in mailboxes of acc
+                    set msg to missing value
                     try
                         set msg to first message of mb whose ({id_match_clause})
+                    on error errText number errNumber
+                        if errNumber is not -1728 then error errText number errNumber
+                    end try
+                    if msg is not missing value then
                         set theAtts to mail attachments of msg
                         save (item {one_based_index} of theAtts) in (POSIX file "{dest_safe}")
                         return "OK"
-                    end try
+                    end if
                 end repeat
             end repeat
             error "Message not found"
         end tell""",
             timeout=self.timeout,
         )
+        if account is not None and mailbox is not None:
+            mailbox_safe = escape_applescript_string(sanitize_input(mailbox))
+            script = (
+                _MAILBOX_RESOLVER_HANDLERS
+                + "\n"
+                + script.replace(
+                    "repeat with acc in accounts",
+                    f"repeat with acc in {{{applescript_account_clause(account)}}}",
+                ).replace(
+                    "repeat with mb in mailboxes of acc",
+                    f'repeat with mb in {{my resolveMailbox(acc, "{mailbox_safe}")}}',
+                )
+            )
         self._run_applescript(script)
 
     def _enforce_inline_cap(self, size: int, name: str) -> None:
@@ -2845,47 +2924,30 @@ class AppleMailConnector:
                 f"files."
             )
 
-    def _get_attachments_applescript(self, message_id: str) -> list[dict[str, Any]]:
-        """AppleScript fallback for get_attachments — iterates account ×
-        mailbox to locate the message, then enumerates attachments via
-        Mail.app's model layer. Slow on accounts with many mailboxes;
-        also subject to known silent-failure cases (see issue #73).
-        Callers with a known account+mailbox should provide them to take
-        the IMAP path instead.
-        """
-        # Accept either the numeric AppleScript id or the RFC Message-ID from
-        # the IMAP read path so a search-result id resolves either way (F2).
-        id_match_clause = _message_id_match_clause(message_id)
-
-        tell_body = f"""
-        tell application "Mail"
-            set resultData to missing value
-            repeat with acc in accounts
-                repeat with mb in mailboxes of acc
-                    try
-                        set msg to first message of mb whose ({id_match_clause})
-                        set attList to mail attachments of msg
-
-                        set resultData to {{}}
-                        repeat with att in attList
-                            set attRecord to {{|name|:(name of att), |mime_type|:(MIME type of att), |size|:(file size of att), |downloaded|:(downloaded of att)}}
-                            set end of resultData to attRecord
-                        end repeat
-                        exit repeat
-                    end try
-                end repeat
-                if resultData is not missing value then exit repeat
-            end repeat
-
-            if resultData is missing value then
-                error "Can't get message: not found"
-            end if
-        end tell
-        """
-
-        script = _wrap_as_json_script(tell_body, timeout=self.timeout)
-        result = self._run_applescript(script)
-        return cast("list[dict[str, Any]]", parse_applescript_json(result))
+    def _get_attachments_applescript(
+        self,
+        message_id: str,
+        *,
+        account: str | None = None,
+        mailbox: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Reuse tolerant metadata reads; enumeration failure is never an empty list."""
+        message = self._get_message_applescript(
+            message_id,
+            include_content=False,
+            include_attachments=True,
+            account=account,
+            mailbox=mailbox,
+        )
+        errors = message.get("attachment_errors", [])
+        if any(error.get("field") == "enumeration" for error in errors):
+            raise MailAppleScriptError(f"Attachment enumeration failed: {errors}")
+        attachments = message.get("attachments", [])
+        for index, attachment in enumerate(attachments):
+            failures = [error for error in errors if error.get("index") == index]
+            if failures:
+                attachment["metadata_errors"] = failures
+        return attachments
 
     def get_thread(self, message_id: str) -> list[dict[str, Any]]:
         """Return all messages in the thread containing ``message_id``.
@@ -4500,13 +4562,8 @@ class AppleMailConnector:
         )
 
         if include_attachments:
-            attachments_clause = """
-                set attList to {}
-                repeat with att in mail attachments of msg
-                    set attRecord to {|name|:(name of att), |mime_type|:(MIME type of att), |size|:(file size of att), |downloaded|:(downloaded of att)}
-                    set end of attList to attRecord
-                end repeat"""
-            attachments_field = ", |attachments|:attList"
+            attachments_clause = _attachment_metadata_clause()
+            attachments_field = ", |attachments|:attList, |attachment_errors|:attachmentErrors, |attachments_complete|:attachmentsComplete"
         else:
             attachments_clause = ""
             attachments_field = ""

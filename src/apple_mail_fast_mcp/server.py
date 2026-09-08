@@ -1233,9 +1233,8 @@ def get_messages(
             token ``"SELECTED"``, which the server resolves at call time
             to Mail.app's current UI selection (zero-or-more messages).
             Mixed lists like ``["SELECTED", "12345"]`` are valid. Empty
-            list is a no-op (returns empty result, no error). Missing ids
-            drop out silently (partial-results convention) — the response
-            contains whatever was found.
+            list is a no-op (returns empty result, no error). Missing ids are reported in ``missing_message_ids`` with
+            ``partial: true`` while available messages are preserved.
         include_content: Include message bodies (default: True).
         headers_only: Skip body fetch on the IMAP path for explicit ids
             (default: False). Silently ignored on the AppleScript fallback.
@@ -1253,6 +1252,9 @@ def get_messages(
             the search that produced the ids.
         include_attachments: Include per-attachment metadata (name,
             mime_type, size, downloaded) on each message (default: True).
+            On AppleScript, unavailable fields are omitted and described in
+            ``attachment_errors``; ``attachments_complete`` is false. These
+            errors preserve the message body and other attachment properties.
             Bounded cost — id-list cardinality is typically 1-10. Free on
             the IMAP fast path; cheap-enough on the AppleScript fallback
             for typical id counts.
@@ -1312,11 +1314,16 @@ def get_messages(
 
         operation_logger.log_operation("get_messages", {"count": len(message_ids)}, "success")
 
-        return {
-            "success": True,
-            "messages": messages,
-            "count": len(messages),
-        }
+        result: dict[str, Any] = {"success": True, "messages": messages, "count": len(messages)}
+        found_ids = {str(msg.get(key)) for msg in messages for key in ("id", "rfc_message_id")}
+        missing = [
+            identifier
+            for identifier in message_ids
+            if identifier != _SELECTED_SENTINEL and identifier not in found_ids
+        ]
+        if missing:
+            result.update(partial=True, missing_message_ids=missing)
+        return result
 
     except Exception as e:
         logger.error("Error getting messages: %s", e)

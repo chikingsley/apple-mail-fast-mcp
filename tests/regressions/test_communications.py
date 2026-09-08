@@ -55,3 +55,57 @@ async def test_regression_code_mode_preserves_confirmation_and_catalog():
         assert result.data["success"] is False
         assert result.data["error_type"] == "cancelled"
     assert writes == []
+
+
+@pytest.mark.allow_real_io
+@pytest.mark.skipif(__import__("sys").platform != "darwin", reason="AppleScript regression")
+def test_regression_attachment_property_error_preserves_message():
+    """Regression: Cica reported that a failing MIME property must preserve content and other attachment fields."""
+    import json
+
+    from apple_mail_fast_mcp.mail_connector import (
+        _attachment_metadata_clause,
+        _wrap_as_json_script,
+    )
+
+    clause = _attachment_metadata_clause().replace("mail attachments of msg", "{1}")
+    for source, value in [
+        ("name of att", '"report.docx"'),
+        ("MIME type of att", "missing value"),
+        ("file size of att", "107471"),
+        ("downloaded of att", "true"),
+    ]:
+        clause = clause.replace(source, value)
+    script = _wrap_as_json_script(
+        clause
+        + '\nset resultData to {|content|:"forwarded chain", |attachments|:attList, |attachment_errors|:attachmentErrors, |attachments_complete|:attachmentsComplete}',
+        timeout=10,
+    )
+    connector = AppleMailConnector(timeout=10)
+    connector._applescript_socket = None
+    result = json.loads(connector._run_applescript(script))
+    assert result["content"] == "forwarded chain"
+    assert result["attachments"][0]["name"] == "report.docx"
+    assert result["attachments"][0]["size"] == 107471
+    assert "mime_type" not in result["attachments"][0]
+    assert result["attachment_errors"][0]["field"] == "mime_type"
+    assert result["attachments_complete"] is False
+
+
+def test_regression_batch_reports_missing_ids():
+    """Regression: Cica partial retrieval must explicitly account for every missing requested ID."""
+    from apple_mail_fast_mcp import server
+    from apple_mail_fast_mcp.exceptions import MailMessageNotFoundError
+
+    with patch.object(
+        server.mail,
+        "get_message",
+        side_effect=[
+            {"id": "42", "rfc_message_id": "found@example.test", "content": "body"},
+            MailMessageNotFoundError("Can't get message: not found"),
+        ],
+    ):
+        result = server.get_messages(["found@example.test", "43"])
+    assert result["count"] == 1
+    assert result["partial"] is True
+    assert result["missing_message_ids"] == ["43"]

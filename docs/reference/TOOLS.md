@@ -169,7 +169,7 @@ Retrieve full details of one or more messages, with bodies. Returns a list (alwa
 
 **Notes:**
 
-- Missing ids drop out silently — the response contains whatever was found (partial-results convention).
+- Available messages are returned; missing requested IDs appear in `missing_message_ids` with `partial: true`.
 - The `"SELECTED"` sentinel is resolved server-side via `mail.get_selected_messages()` at call time. Empty selection expands to nothing.
 - Pair with `search_messages` (metadata-only, criteria-based) and `get_thread` (thread member ids) to fetch bodies for specific messages.
 - When ids come from `search_messages`, pass its same `account` and exact `mailbox` into `get_messages`. This preserves the fast IMAP path and consistent id semantics; omitting the scope invokes the global AppleScript lookup.
@@ -223,6 +223,8 @@ get_messages(["abc@x"], account="iCloud", mailbox="INBOX", headers_only=True)
 - `unknown`: Unexpected error occurred
 
 ______________________________________________________________________
+
+On AppleScript reads, `attachments_complete: false` and `attachment_errors` identify failed attachment properties. Available fields and the full message body remain in the response. A MIME-type failure does not mean the message or attachment is absent. Attachment byte retrieval preserves the supplied account and folder scope. Missing requested message IDs are listed in `missing_message_ids` with `partial: true`.
 
 ### get_thread
 
