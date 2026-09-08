@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import shutil
+import sys
 
 import json5
 import tomlkit
@@ -57,16 +58,19 @@ def save(path, data):
     temp.replace(path)
 
 
+python = str(pathlib.Path(sys._base_executable).resolve())
+save(root / "python-path", python + "\n")
+client_args = ["run", "--python", python, "--locked", "--script", str(client)]
 names = ["apple-mail", "beeper"]
 configured = []
 p = home / ".codex/config.toml"
 if p.exists() or shutil.which("codex"):
-    doc = tomlkit.parse(p.read_text()) if p.exists() else tomlkit.document()
+    doc = tomlkit.parse(p.read_text(encoding="utf-8-sig")) if p.exists() else tomlkit.document()
     servers = doc.setdefault("mcp_servers", tomlkit.table())
     for name in names:
         servers[name] = {
             "command": uv,
-            "args": ["run", "--locked", "--script", str(client), name],
+            "args": [*client_args, name],
             "enabled": True,
             "startup_timeout_sec": 90,
             "tool_timeout_sec": 120,
@@ -75,24 +79,24 @@ if p.exists() or shutil.which("codex"):
     configured.append("codex")
 p = home / ".claude.json"
 if p.exists() or shutil.which("claude"):
-    doc = json.loads(p.read_text()) if p.exists() else {}
+    doc = json.loads(p.read_text(encoding="utf-8-sig")) if p.exists() else {}
     servers = doc.setdefault("mcpServers", {})
     for name in names:
         servers[name] = {
             "type": "stdio",
             "command": uv,
-            "args": ["run", "--locked", "--script", str(client), name],
+            "args": [*client_args, name],
         }
     save(p, json.dumps(doc, indent=2) + "\n")
     configured.append("claude")
 for p in [home / ".config/opencode/opencode.json", home / ".config/opencode/opencode.jsonc"]:
     if not p.exists():
         continue
-    doc = json5.loads(p.read_text())
+    doc = json5.loads(p.read_text(encoding="utf-8-sig"))
     for name in names:
         doc.setdefault("mcp", {})[name] = {
             "type": "local",
-            "command": [uv, "run", "--locked", "--script", str(client), name],
+            "command": [uv, *client_args, name],
             "enabled": True,
             "timeout": 120000,
         }
@@ -100,21 +104,21 @@ for p in [home / ".config/opencode/opencode.json", home / ".config/opencode/open
     configured.append("opencode")
 p = home / ".kimi-code/mcp.json"
 if p.exists() or shutil.which("kimi"):
-    doc = json.loads(p.read_text()) if p.exists() else {}
+    doc = json.loads(p.read_text(encoding="utf-8-sig")) if p.exists() else {}
     for name in names:
         doc.setdefault("mcpServers", {})[name] = {
             "command": uv,
-            "args": ["run", "--locked", "--script", str(client), name],
+            "args": [*client_args, name],
         }
     save(p, json.dumps(doc, indent=2) + "\n")
     configured.append("kimi")
 p = home / "Library/Application Support/Claude/claude_desktop_config.json"
 if p.exists():
-    doc = json.loads(p.read_text())
+    doc = json.loads(p.read_text(encoding="utf-8-sig"))
     for name in names:
         doc.setdefault("mcpServers", {})[name] = {
             "command": uv,
-            "args": ["run", "--locked", "--script", str(client), name],
+            "args": [*client_args, name],
         }
     save(p, json.dumps(doc, indent=2) + "\n")
     configured.append("claude-desktop")
@@ -122,7 +126,7 @@ for prefix in [".agents/skills", ".codex/skills", ".claude/skills", ".kimi-code/
     for name in ["apple-mail", "messages"]:
         src = source.parent / "skills" / name / "SKILL.md"
         p = home / prefix / name / "SKILL.md"
-        save(p, src.read_text())
+        save(p, src.read_text(encoding="utf-8-sig"))
 # A shell convenience command, also useful for manual MCP diagnostics.
 binpath = home / ".local/bin"
 binpath.mkdir(parents=True, exist_ok=True)
@@ -133,7 +137,9 @@ save(
     launcher,
     "#!/bin/sh\nexec "
     + shlex.quote(uv)
-    + " run --locked --script "
+    + " run --python "
+    + shlex.quote(python)
+    + " --locked --script "
     + shlex.quote(str(client))
     + ' "$@"\n',
 )

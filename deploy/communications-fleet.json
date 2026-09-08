@@ -1,0 +1,41 @@
+{
+  "hosts": {
+    "hochi": {
+      "platform": "posix",
+      "local": true,
+      "uv": "/opt/homebrew/bin/uv",
+      "user": "simonpeacocks"
+    },
+    "gmk": {
+      "platform": "posix",
+      "ssh": "gmk",
+      "uv": "/home/simon/.local/bin/uv",
+      "user": "simon"
+    },
+    "hojo": {
+      "platform": "posix",
+      "ssh": "hojo",
+      "uv": "/opt/homebrew/bin/uv",
+      "user": "Richstgo"
+    },
+    "hoboy": {
+      "platform": "windows",
+      "ssh": "hoboy",
+      "user": "chiejimofor"
+    },
+    "glkvm": {
+      "platform": "posix",
+      "ssh": "glkvm",
+      "uv": "/root/.local/bin/uv",
+      "user": "root"
+    },
+    "cica": {
+      "platform": "windows",
+      "ssh": "user18@cica.tailbce39f.ts.net",
+      "port": 2222,
+      "identity": "~/.ssh/id_ed25519_hochi",
+      "user": "user18",
+      "python": "C:/Users/user18/AppData/Roaming/uv/python/cpython-3.14.7-windows-x86_64-none/python.exe"
+    }
+  }
+}

@@ -38,3 +38,19 @@ The cleaner uses `~/.config/apple-mail-fast-mcp/junk.sqlite` and an adjacent loc
 For each installed adapter, establish an MCP connection, list the three exposed tools, discover a schema, and execute a bounded read. Verify Mail and Beeper separately from every reachable host. For Mail, enumerate enabled accounts and exact mailbox paths, then search metadata and read a selected result. Check authentication rejection with no token. A saved configuration alone is not a successful connection.
 
 Run `just check` before deploying code. The regression suite covers folder matching, numeric message IDs, scoped reads, and confirmation preservation through Code Mode. Keep the previous release and backed-up launch definitions available for rollback. The older `apple-mail-fleet` command describes the earlier Mail-only deployment; use this guide for the shared adapter installation.
+
+## Distribution inventory
+
+`deploy/communications-fleet.json` is the explicit list of computers and agent-user accounts. It includes Hochi, gmk, hojo, hoboy, glkvm, and cica. A listed computer is not proof of installation: run the fleet check to establish current access. Cica uses its existing SSH service on port 2222 as `user18`; the inventory records that port and the Hochi key explicitly. Its route was recovered from gmk's chat-sync SSH configuration.
+
+Run these commands on Hochi from this repository:
+
+```sh
+python3 deploy/communications-fleet.py list
+python3 deploy/communications-fleet.py check --all
+python3 deploy/communications-fleet.py install --host glkvm
+```
+
+Installation copies the pinned adapter and validated skills, securely transfers the shared gateway credential over SSH, updates supported installed agent configurations, and then verifies discovery, schema lookup, and a read operation on both services. Existing credentials are never included in the inventory or source archive. The target needs `uv`, SSH access, and enough space for managed Python and adapter dependencies. Windows targets also need PowerShell and `tar`.
+
+Add future computers to the inventory with the correct SSH target and actual agent-user account, install that target, and verify it. Run `check --all` after changes; it exits unsuccessfully if any registered target is pending or fails. Installing for one OS user does not configure other users, containers, cloud agents, or already-running sessions on that computer.
