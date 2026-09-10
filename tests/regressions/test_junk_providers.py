@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from apple_mail_fast_mcp.junk_providers import (
+from apple_mail_mcp.junk_providers import (
     GmailPurger,
     ImapPurger,
     MicrosoftPurger,

@@ -53,7 +53,7 @@ Mail.app's real primitive is the draft — every outgoing message is a draft unt
 
 ## IMAP thread tiers (`get_thread`)
 
-`find_thread_members` picks the cheapest correct strategy per provider (see [../research/imap-thread-strategies.md](../research/imap-thread-strategies.md)):
+`find_thread_members` picks the cheapest correct strategy per provider:
 
 | Tier | Strategy                                  | When                                     | Cost                                      |
 | ---- | ----------------------------------------- | ---------------------------------------- | ----------------------------------------- |

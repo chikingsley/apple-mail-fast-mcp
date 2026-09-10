@@ -56,6 +56,7 @@ def payload():
             "skills/messages/SKILL.md",
         ]:
             archive.add(ROOT / relative, arcname=relative)
+        archive.add(ROOT.parent / "apple-calendar-global/skills/apple-calendar/SKILL.md", arcname="skills/apple-calendar/SKILL.md")
     return output.getvalue()
 
 
@@ -66,6 +67,8 @@ def run(name, host, action):
                 [
                     host["uv"],
                     "run",
+                    "--python",
+                    "3.14.7",
                     "--locked",
                     "--script",
                     str(ROOT / "deploy/install-communications.py"),
@@ -82,7 +85,7 @@ def run(name, host, action):
         raise RuntimeError(host.get("pending", "SSH target is not configured"))
     if host["platform"] == "windows":
         python_arg = (
-            " --python '" + host["python"].replace("'", "''") + "'" if host.get("python") else ""
+            " --python '" + host["python"].replace("'", "''") + "'" if host.get("python") else " --python 3.14.7"
         )
         if action == "install":
             powershell(
@@ -133,7 +136,7 @@ def run(name, host, action):
         ssh(
             host,
             uv
-            + " run --locked --script ~/.config/peacockery-communications/install/deploy/install-communications.py",
+            + " run --python 3.14.7 --locked --script ~/.config/peacockery-communications/install/deploy/install-communications.py",
         )
     ssh(
         host,

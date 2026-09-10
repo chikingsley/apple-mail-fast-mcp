@@ -10,7 +10,7 @@ from __future__ import annotations
 
 # --- HTML body support (issue #251) --------------------------------------
 # --- Reply/forward extensions (issue #245 follow-up) ---------------------
-from apple_mail_fast_mcp.draft_builder import (
+from apple_mail_mcp.draft_builder import (
     build_draft_mime,
 )
 

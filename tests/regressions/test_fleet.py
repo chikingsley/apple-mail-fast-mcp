@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from apple_mail_fast_mcp.fleet_support import run
+from apple_mail_mcp.fleet_support import run
 
 
 @pytest.mark.allow_real_io

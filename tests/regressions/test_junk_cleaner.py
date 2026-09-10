@@ -3,16 +3,16 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from apple_mail_fast_mcp.junk_campaigns import JunkCampaignStore
-from apple_mail_fast_mcp.junk_cleaner import (
+from apple_mail_mcp.junk_campaigns import JunkCampaignStore
+from apple_mail_mcp.junk_cleaner import (
     JunkCleanerConfig,
     JunkMailbox,
     _eligible_messages,
     clean_junk,
     junk_mailboxes,
 )
-from apple_mail_fast_mcp.junk_providers import ProviderAccount
-from apple_mail_fast_mcp.mail_connector import AppleMailConnector
+from apple_mail_mcp.junk_providers import ProviderAccount
+from apple_mail_mcp.mail_connector import AppleMailConnector
 
 
 def test_junk_regression_discovers_each_enabled_accounts_junk_mailbox() -> None:
@@ -141,9 +141,7 @@ def test_junk_regression_clears_flags_before_provider_health(
         connector.update_message.assert_called_once()
         raise RuntimeError("health probe crashed")
 
-    monkeypatch.setattr(
-        "apple_mail_fast_mcp.junk_cleaner.check_provider_health", fail_after_flag_clear
-    )
+    monkeypatch.setattr("apple_mail_mcp.junk_cleaner.check_provider_health", fail_after_flag_clear)
     config = JunkCleanerConfig(
         mode="delete",
         minimum_domains=3,
@@ -185,7 +183,7 @@ def test_junk_regression_unhealthy_provider_defers_delete_after_unflag(
     connector.search_messages.side_effect = [[flagged], [flagged], []]
     connector.update_message.return_value = 1
     monkeypatch.setattr(
-        "apple_mail_fast_mcp.junk_cleaner.check_provider_health",
+        "apple_mail_mcp.junk_cleaner.check_provider_health",
         lambda **_kwargs: [
             {
                 "account": "mail@outlook.com",
@@ -196,7 +194,7 @@ def test_junk_regression_unhealthy_provider_defers_delete_after_unflag(
         ],
     )
     build_purger = MagicMock()
-    monkeypatch.setattr("apple_mail_fast_mcp.junk_cleaner.build_purger", build_purger)
+    monkeypatch.setattr("apple_mail_mcp.junk_cleaner.build_purger", build_purger)
     config = JunkCleanerConfig(
         mode="delete",
         minimum_domains=3,

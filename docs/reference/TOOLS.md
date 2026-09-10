@@ -4,7 +4,7 @@ Complete reference for all MCP tools provided by the Apple Mail MCP server.
 
 ## Overview
 
-**Total Tools:** 25 (11 read-only, 14 mutating — see Classification below). See the [CHANGELOG](../../CHANGELOG.md) for the version history.
+**Total Tools:** 25 (11 read-only, 14 mutating — see Classification below). See Git history for changes.
 
 ## Tool annotations (`readOnlyHint` / `destructiveHint` / `idempotentHint`)
 

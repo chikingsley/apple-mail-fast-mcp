@@ -24,7 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apple_mail_fast_mcp.imap_connector import (
+from apple_mail_mcp.imap_connector import (
     ImapConnectionPool,
 )
 
@@ -66,7 +66,7 @@ def short_idle_pool() -> ImapConnectionPool:
 
 
 class TestClose:
-    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    @patch("apple_mail_mcp.imap_connector.IMAPClient")
     def test_close_waits_for_in_flight_session_holder(
         self, mock_cls: MagicMock, pool: ImapConnectionPool
     ) -> None:

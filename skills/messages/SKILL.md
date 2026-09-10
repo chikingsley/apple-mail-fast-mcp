@@ -20,3 +20,5 @@ Use the global `beeper` MCP. It connects to Beeper Desktop on Hochi through thre
 Installed clients use `peacockery-mcp beeper`. The authenticated shared gateway is `https://hochi.tailbce39f.ts.net/beeper/mcp`; local clients use loopback. Beeper's underlying MCP endpoint is `/v0/mcp`, and its OpenAPI specification is `/v1/spec` on port 23373. The specification describes the API; it is not the MCP endpoint.
 
 Beeper must be running with approved connections enabled. The non-expiring shared Beeper token stays on Hochi; remote adapters use the shared gateway credential. Do not create another OAuth connection for each agent. If access fails, check the adapter, gateway, and Beeper separately, and report the observed failure. Never claim that the LAN address alone establishes public internet access.
+
+For mutations, call MCP execute with `tool_name` and `arguments`, for example `{"tool_name":"create_draft","arguments":{...}}`. Use `code` only for read workflows. Honor any native confirmation request; do not auto-approve it.

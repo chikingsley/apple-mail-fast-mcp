@@ -3,12 +3,12 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from apple_mail_fast_mcp.auth_recovery import (
+from apple_mail_mcp.auth_recovery import (
     AuthenticationRecoveryDispatcher,
     AuthenticationRecoveryPolicy,
     _notify_device_code,
 )
-from apple_mail_fast_mcp.junk_providers import ProviderAccount
+from apple_mail_mcp.junk_providers import ProviderAccount
 
 
 def test_junk_regression_recovery_identity_ignores_error_wording_and_uses_no_agent(
@@ -18,10 +18,10 @@ def test_junk_regression_recovery_identity_ignores_error_wording_and_uses_no_age
     process = MagicMock(pid=4321)
     popen = MagicMock(return_value=process)
     monkeypatch.setattr(
-        "apple_mail_fast_mcp.auth_recovery.shutil.which", lambda _name: "/bin/apple-mail-ops"
+        "apple_mail_mcp.auth_recovery.shutil.which", lambda _name: "/bin/apple-mail-ops"
     )
-    monkeypatch.setattr("apple_mail_fast_mcp.auth_recovery.subprocess.Popen", popen)
-    monkeypatch.setattr("apple_mail_fast_mcp.auth_recovery._process_is_running", lambda _pid: True)
+    monkeypatch.setattr("apple_mail_mcp.auth_recovery.subprocess.Popen", popen)
+    monkeypatch.setattr("apple_mail_mcp.auth_recovery._process_is_running", lambda _pid: True)
     dispatcher = AuthenticationRecoveryDispatcher(
         policy=AuthenticationRecoveryPolicy(enabled=True),
         state_directory=tmp_path / "recoveries",
@@ -88,9 +88,9 @@ def test_junk_regression_transient_timeout_does_not_start_login(
     """Regression: a provider timeout must preserve credentials and retry health later."""
     popen = MagicMock()
     monkeypatch.setattr(
-        "apple_mail_fast_mcp.auth_recovery.shutil.which", lambda _name: "/bin/apple-mail-ops"
+        "apple_mail_mcp.auth_recovery.shutil.which", lambda _name: "/bin/apple-mail-ops"
     )
-    monkeypatch.setattr("apple_mail_fast_mcp.auth_recovery.subprocess.Popen", popen)
+    monkeypatch.setattr("apple_mail_mcp.auth_recovery.subprocess.Popen", popen)
     dispatcher = AuthenticationRecoveryDispatcher(
         policy=AuthenticationRecoveryPolicy(enabled=True),
         state_directory=tmp_path / "recoveries",

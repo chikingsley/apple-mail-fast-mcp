@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from apple_mail_fast_mcp.junk_health import DiscordWebhookNotifier
+from apple_mail_mcp.junk_health import DiscordWebhookNotifier
 
 
 class DiscordResponse:
@@ -39,7 +39,7 @@ def test_junk_regression_discord_delivery_returns_created_message_receipt(
         requests.append((request, timeout))
         return DiscordResponse()
 
-    monkeypatch.setattr("apple_mail_fast_mcp.junk_health.urlopen", open_request)
+    monkeypatch.setattr("apple_mail_mcp.junk_health.urlopen", open_request)
 
     receipt = DiscordWebhookNotifier(webhook_file).send_text("copyable-code")
 

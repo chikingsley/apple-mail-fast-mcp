@@ -5,7 +5,7 @@ import plistlib
 from pathlib import Path
 from subprocess import CompletedProcess
 
-from apple_mail_fast_mcp.ops_cli import MANAGED_SERVICES, status_payload
+from apple_mail_mcp.ops_cli import MANAGED_SERVICES, status_payload
 
 
 def test_ops_regression_status_exposes_managed_and_external_launch_agents(
@@ -32,7 +32,7 @@ def test_ops_regression_status_exposes_managed_and_external_launch_agents(
             stderr="",
         )
 
-    monkeypatch.setattr("apple_mail_fast_mcp.ops_cli.subprocess.run", fake_run)
+    monkeypatch.setattr("apple_mail_mcp.ops_cli.subprocess.run", fake_run)
 
     payload = status_payload()
 

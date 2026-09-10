@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apple_mail_fast_mcp.exceptions import (
+from apple_mail_mcp.exceptions import (
     MailAccountNotFoundError,
     MailAppleScriptError,
     MailDraftNotFoundError,
@@ -22,7 +22,7 @@ from apple_mail_fast_mcp.exceptions import (
     MailMessageNotFoundError,
     MailSafetyError,
 )
-from apple_mail_fast_mcp.mail_connector import (
+from apple_mail_mcp.mail_connector import (
     AppleMailConnector,
 )
 
@@ -307,7 +307,7 @@ class TestAppleMailConnector:
         third-party Apple ID and an empty `email addresses` list, where #299's
         apple-alias rule has nothing to choose from.
         """
-        from apple_mail_fast_mcp import imap_overrides
+        from apple_mail_mcp import imap_overrides
 
         monkeypatch.setenv("APPLE_MAIL_MCP_HOME", str(tmp_path))
         imap_overrides.set_login_override("iCloud", "s.morgan@icloud.com")
@@ -334,7 +334,7 @@ class TestAppleMailConnector:
         misreports the IMAP port (e.g. Zimbra returning 143 for a 993/implicit-
         TLS account).
         """
-        from apple_mail_fast_mcp import imap_overrides
+        from apple_mail_mcp import imap_overrides
 
         monkeypatch.setenv("APPLE_MAIL_MCP_HOME", str(tmp_path))
         imap_overrides.set_server_override("Work", host=None, port=993)
@@ -358,7 +358,7 @@ class TestAppleMailConnector:
         """#405: a persisted host override (setup-imap --host) wins over the
         server name Mail.app reports.
         """
-        from apple_mail_fast_mcp import imap_overrides
+        from apple_mail_mcp import imap_overrides
 
         monkeypatch.setenv("APPLE_MAIL_MCP_HOME", str(tmp_path))
         imap_overrides.set_server_override("Work", host="imap.real.example", port=None)
@@ -386,7 +386,7 @@ class TestAppleMailConnector:
         alias); with the host overridden to a plain host, the login stays the
         reported user_name.
         """
-        from apple_mail_fast_mcp import imap_overrides
+        from apple_mail_mcp import imap_overrides
 
         monkeypatch.setenv("APPLE_MAIL_MCP_HOME", str(tmp_path))
         imap_overrides.set_server_override("iCloud", host="imap.corp.example", port=None)
@@ -855,7 +855,7 @@ class TestDeleteDraft:
         can't break out of the AppleScript string even if it ever got past
         validation/resolution.
         """
-        from apple_mail_fast_mcp.utils import (
+        from apple_mail_mcp.utils import (
             escape_applescript_string,
             sanitize_input,
         )
@@ -907,7 +907,7 @@ class TestGetDraftState:
         connector: AppleMailConnector,
     ) -> None:
         """#294 defense-in-depth: the resolved id is escaped into targetId."""
-        from apple_mail_fast_mcp.utils import (
+        from apple_mail_mcp.utils import (
             escape_applescript_string,
             sanitize_input,
         )
@@ -1159,7 +1159,7 @@ class TestExtractDraftAttachments:
         tmp_path: Any,
     ) -> None:
         """#294 defense-in-depth: the resolved id is escaped into targetId."""
-        from apple_mail_fast_mcp.utils import (
+        from apple_mail_mcp.utils import (
             escape_applescript_string,
             sanitize_input,
         )
@@ -1198,7 +1198,7 @@ class TestUpdateMailbox:
         ``MailUnsupportedGmailSystemLabelError`` before any AppleScript
         runs (#164). Renames of Gmail system labels don't stick anyway.
         """
-        from apple_mail_fast_mcp.exceptions import (
+        from apple_mail_mcp.exceptions import (
             MailUnsupportedGmailSystemLabelError,
         )
 
@@ -1218,8 +1218,8 @@ class TestUpdateMailboxMove:
     def connector(self) -> AppleMailConnector:
         return AppleMailConnector(timeout=30)
 
-    @patch("apple_mail_fast_mcp.mail_connector.ImapConnector")
-    @patch("apple_mail_fast_mcp.mail_connector.get_imap_password")
+    @patch("apple_mail_mcp.mail_connector.ImapConnector")
+    @patch("apple_mail_mcp.mail_connector.get_imap_password")
     @patch.object(AppleMailConnector, "_resolve_imap_config")
     def test_gmail_system_label_source_refused_before_imap_session(
         self,
@@ -1231,7 +1231,7 @@ class TestUpdateMailboxMove:
         """Move source ``[Gmail]/Sent Mail`` raises before the IMAP
         credential lookup runs (#164).
         """
-        from apple_mail_fast_mcp.exceptions import (
+        from apple_mail_mcp.exceptions import (
             MailUnsupportedGmailSystemLabelError,
         )
 
@@ -1246,8 +1246,8 @@ class TestUpdateMailboxMove:
         mock_pw.assert_not_called()
         mock_imap_cls.assert_not_called()
 
-    @patch("apple_mail_fast_mcp.mail_connector.ImapConnector")
-    @patch("apple_mail_fast_mcp.mail_connector.get_imap_password")
+    @patch("apple_mail_mcp.mail_connector.ImapConnector")
+    @patch("apple_mail_mcp.mail_connector.get_imap_password")
     @patch.object(AppleMailConnector, "_resolve_imap_config")
     def test_gmail_system_label_destination_parent_refused(
         self,
@@ -1260,7 +1260,7 @@ class TestUpdateMailboxMove:
         refused — the resulting destination would land in Gmail's
         system-label namespace (#164).
         """
-        from apple_mail_fast_mcp.exceptions import (
+        from apple_mail_mcp.exceptions import (
             MailUnsupportedGmailSystemLabelError,
         )
 
@@ -1274,8 +1274,8 @@ class TestUpdateMailboxMove:
         mock_pw.assert_not_called()
         mock_imap_cls.assert_not_called()
 
-    @patch("apple_mail_fast_mcp.mail_connector.ImapConnector")
-    @patch("apple_mail_fast_mcp.mail_connector.get_imap_password")
+    @patch("apple_mail_mcp.mail_connector.ImapConnector")
+    @patch("apple_mail_mcp.mail_connector.get_imap_password")
     @patch.object(AppleMailConnector, "_resolve_imap_config")
     def test_bare_gmail_parent_destination_refused(
         self,
@@ -1287,7 +1287,7 @@ class TestUpdateMailboxMove:
         """``new_parent="[Gmail]"`` produces a destination of
         ``[Gmail]/<leaf>`` — also a system-label path; refused (#164).
         """
-        from apple_mail_fast_mcp.exceptions import (
+        from apple_mail_mcp.exceptions import (
             MailUnsupportedGmailSystemLabelError,
         )
 
@@ -1309,8 +1309,8 @@ class TestDeleteMailbox:
     def connector(self) -> AppleMailConnector:
         return AppleMailConnector(timeout=30)
 
-    @patch("apple_mail_fast_mcp.mail_connector.ImapConnector")
-    @patch("apple_mail_fast_mcp.mail_connector.get_imap_password")
+    @patch("apple_mail_mcp.mail_connector.ImapConnector")
+    @patch("apple_mail_mcp.mail_connector.get_imap_password")
     @patch.object(AppleMailConnector, "_resolve_imap_config")
     def test_gmail_system_label_refused_before_credential_lookup(
         self,
@@ -1322,7 +1322,7 @@ class TestDeleteMailbox:
         """Pre-flight: deleting ``[Gmail]/Trash`` raises before the IMAP
         credential lookup runs (#164).
         """
-        from apple_mail_fast_mcp.exceptions import (
+        from apple_mail_mcp.exceptions import (
             MailUnsupportedGmailSystemLabelError,
         )
 
@@ -1332,8 +1332,8 @@ class TestDeleteMailbox:
         mock_pw.assert_not_called()
         mock_imap_cls.assert_not_called()
 
-    @patch("apple_mail_fast_mcp.mail_connector.ImapConnector")
-    @patch("apple_mail_fast_mcp.mail_connector.get_imap_password")
+    @patch("apple_mail_mcp.mail_connector.ImapConnector")
+    @patch("apple_mail_mcp.mail_connector.get_imap_password")
     @patch.object(AppleMailConnector, "_resolve_imap_config")
     def test_bare_gmail_parent_refused(
         self,
@@ -1343,7 +1343,7 @@ class TestDeleteMailbox:
         connector: AppleMailConnector,
     ) -> None:
         """The bare ``[Gmail]`` parent is also refused (#164)."""
-        from apple_mail_fast_mcp.exceptions import (
+        from apple_mail_mcp.exceptions import (
             MailUnsupportedGmailSystemLabelError,
         )
 
@@ -1374,7 +1374,7 @@ class TestReceivedWithinHours:
         message is older than the cutoff, every subsequent iteration would
         also be older — so we exit the loop entirely instead of skipping.
         """
-        from apple_mail_fast_mcp.mail_connector import AppleMailConnector
+        from apple_mail_mcp.mail_connector import AppleMailConnector
 
         connector = AppleMailConnector()
         mock_run.return_value = "[]"
@@ -1417,7 +1417,7 @@ class TestKeychainDualFormLookup:
         the UUID form misses (env + Keychain), the wrapper resolves UUID→name,
         and the name form hits the env var (no Keychain shell-out for it).
         """
-        from apple_mail_fast_mcp.mail_connector import AppleMailConnector
+        from apple_mail_mcp.mail_connector import AppleMailConnector
 
         monkeypatch.setenv("APPLE_MAIL_MCP_IMAP_PASSWORD_GMAIL", "ENV-PW")
         # The UUID form has no env var and its Keychain lookup must report
@@ -1432,7 +1432,7 @@ class TestKeychainDualFormLookup:
             m.stderr = "could not be found in the keychain."
             return m
 
-        monkeypatch.setattr("apple_mail_fast_mcp.keychain.subprocess.run", fake_run)
+        monkeypatch.setattr("apple_mail_mcp.keychain.subprocess.run", fake_run)
         c = AppleMailConnector()
         monkeypatch.setattr(
             c,
@@ -1468,8 +1468,8 @@ class TestCreateDraftImapAppend:
         return AppleMailConnector(timeout=30)
 
     @patch.object(AppleMailConnector, "_run_applescript")
-    @patch("apple_mail_fast_mcp.mail_connector.ImapConnector")
-    @patch("apple_mail_fast_mcp.mail_connector.get_imap_password", return_value="pw")
+    @patch("apple_mail_mcp.mail_connector.ImapConnector")
+    @patch("apple_mail_mcp.mail_connector.get_imap_password", return_value="pw")
     @patch.object(
         AppleMailConnector,
         "_resolve_imap_config",
@@ -1511,8 +1511,8 @@ class TestCreateDraftImapAppend:
         assert "@" in result["draft_id"]
 
     @patch.object(AppleMailConnector, "_run_applescript", return_value="123")
-    @patch("apple_mail_fast_mcp.mail_connector.ImapConnector")
-    @patch("apple_mail_fast_mcp.mail_connector.get_imap_password", return_value="pw")
+    @patch("apple_mail_mcp.mail_connector.ImapConnector")
+    @patch("apple_mail_mcp.mail_connector.get_imap_password", return_value="pw")
     @patch.object(
         AppleMailConnector,
         "_resolve_imap_config",
@@ -1530,7 +1530,7 @@ class TestCreateDraftImapAppend:
         MailDraftHtmlUnavailableError — never silently downgrade to a
         plain-text AppleScript draft.
         """
-        from apple_mail_fast_mcp.exceptions import (
+        from apple_mail_mcp.exceptions import (
             MailDraftHtmlUnavailableError,
         )
 
@@ -1635,7 +1635,7 @@ class TestSmtpSendPath:
         self._configure_smtp(connector, monkeypatch)
         scripts: list[str] = []
         monkeypatch.setattr(connector, "_run_applescript", lambda s: scripts.append(s) or "")
-        with patch("apple_mail_fast_mcp.mail_connector.SmtpSender") as sender_cls:
+        with patch("apple_mail_mcp.mail_connector.SmtpSender") as sender_cls:
             result = connector.create_draft(
                 seed="new",
                 to=["a@example.com"],
@@ -1673,7 +1673,7 @@ class TestSmtpSendPath:
         self._configure_smtp(connector, monkeypatch)
         scripts: list[str] = []
         monkeypatch.setattr(connector, "_run_applescript", lambda s: scripts.append(s) or "SENT")
-        with patch("apple_mail_fast_mcp.smtp_sender.smtplib.SMTP") as mock_smtp:
+        with patch("apple_mail_mcp.smtp_sender.smtplib.SMTP") as mock_smtp:
             client = mock_smtp.return_value.__enter__.return_value
             # send_message succeeds (message accepted); QUIT on `with` exit
             # returns non-221, which SMTP.__exit__ raises.
@@ -1713,8 +1713,8 @@ class TestSmtpSendPath:
         self._configure_smtp_without_sent_stub(connector, monkeypatch)
         monkeypatch.setattr(connector, "_run_applescript", lambda s: "")
         with (
-            patch("apple_mail_fast_mcp.mail_connector.SmtpSender"),
-            patch("apple_mail_fast_mcp.mail_connector.ImapConnector") as imap_cls,
+            patch("apple_mail_mcp.mail_connector.SmtpSender"),
+            patch("apple_mail_mcp.mail_connector.ImapConnector") as imap_cls,
         ):
             connector.create_draft(
                 seed="new",
@@ -1741,8 +1741,8 @@ class TestSmtpSendPath:
             lambda **kw: ("<m@id>", b"rawreply", ["orig@example.net"]),
         )
         with (
-            patch("apple_mail_fast_mcp.mail_connector.SmtpSender"),
-            patch("apple_mail_fast_mcp.mail_connector.ImapConnector") as imap_cls,
+            patch("apple_mail_mcp.mail_connector.SmtpSender"),
+            patch("apple_mail_mcp.mail_connector.ImapConnector") as imap_cls,
         ):
             connector._try_smtp_send(
                 seed="reply",
@@ -1776,8 +1776,8 @@ class TestSmtpSendPath:
         )
         monkeypatch.setattr(connector, "_run_applescript", lambda s: "")
         with (
-            patch("apple_mail_fast_mcp.mail_connector.SmtpSender"),
-            patch("apple_mail_fast_mcp.mail_connector.ImapConnector") as imap_cls,
+            patch("apple_mail_mcp.mail_connector.SmtpSender"),
+            patch("apple_mail_mcp.mail_connector.ImapConnector") as imap_cls,
         ):
             connector.create_draft(
                 seed="new",
@@ -1802,8 +1802,8 @@ class TestSmtpSendPath:
         scripts: list[str] = []
         monkeypatch.setattr(connector, "_run_applescript", lambda s: scripts.append(s) or "SENT")
         with (
-            patch("apple_mail_fast_mcp.mail_connector.SmtpSender"),
-            patch("apple_mail_fast_mcp.mail_connector.ImapConnector") as imap_cls,
+            patch("apple_mail_mcp.mail_connector.SmtpSender"),
+            patch("apple_mail_mcp.mail_connector.ImapConnector") as imap_cls,
         ):
             # Sent-copy APPEND blows up hard (no Sent folder, protocol error…).
             imap_cls.return_value.append_sent_copy.side_effect = MailMessageNotFoundError(
@@ -1847,7 +1847,7 @@ class TestSmtpSendPath:
             ),
         )
         with (
-            patch("apple_mail_fast_mcp.mail_connector.SmtpSender") as sender_cls,
+            patch("apple_mail_mcp.mail_connector.SmtpSender") as sender_cls,
             pytest.raises(MailSafetyError),
         ):
             connector._try_smtp_send(

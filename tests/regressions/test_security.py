@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from apple_mail_fast_mcp.security import (
+from apple_mail_mcp.security import (
     _get_test_account_identifiers,
     check_test_mode_safety,
     operation_logger,
@@ -17,7 +17,7 @@ from apple_mail_fast_mcp.security import (
 def test_macos_installer_uses_account_derived_peacockery_password_file_env() -> None:
     """Regression: the deployed password-file variable must match keychain.py."""
     repo_root = Path(__file__).resolve().parents[2]
-    installer = (repo_root / "src/apple_mail_fast_mcp/macos_install.py").read_text()
+    installer = (repo_root / "src/apple_mail_mcp/macos_install.py").read_text()
     plist = (repo_root / "deploy/macos/studio.peacockery.apple-mail-mcp.plist").read_text()
     expected = "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_SIMON_PEACOCKERY_STUDIO"
 
@@ -30,7 +30,7 @@ def test_macos_installer_uses_account_derived_peacockery_password_file_env() -> 
 def test_issue_413_macos_installer_wires_known_account_password_files() -> None:
     """#413: known app-password files persist across service reinstalls."""
     repo_root = Path(__file__).resolve().parents[2]
-    installer = (repo_root / "src/apple_mail_fast_mcp/macos_install.py").read_text()
+    installer = (repo_root / "src/apple_mail_mcp/macos_install.py").read_text()
     plist = (repo_root / "deploy/macos/studio.peacockery.apple-mail-mcp.plist").read_text()
     expected = (
         "APPLE_MAIL_MCP_IMAP_PASSWORD_FILE_CHIBUZOR_EJIMOFOR_GMAIL_COM",
@@ -60,7 +60,7 @@ def test_issue_376_remote_launch_agent_enables_local_metadata_accelerator() -> N
 def test_regression_macos_installer_always_enables_http_bearer_authentication() -> None:
     """Regression: a reinstall must never silently publish an unauthenticated MCP."""
     repo_root = Path(__file__).resolve().parents[2]
-    installer = (repo_root / "src/apple_mail_fast_mcp/macos_install.py").read_text()
+    installer = (repo_root / "src/apple_mail_mcp/macos_install.py").read_text()
 
     assert "if not token.exists():" in installer
     assert '_validate_secret(token, "HTTP bearer token")' in installer
@@ -101,7 +101,7 @@ class TestCheckTestModeSafety:
         ``subprocess.run`` in their own body (shadowing this).
         """
         monkeypatch.setattr(
-            "apple_mail_fast_mcp.security.subprocess.run",
+            "apple_mail_mcp.security.subprocess.run",
             lambda *a, **k: type("R", (), {"returncode": 1, "stdout": "", "stderr": "n/a"})(),
         )
 

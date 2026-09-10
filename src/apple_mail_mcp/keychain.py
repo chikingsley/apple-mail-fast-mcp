@@ -28,12 +28,12 @@ import re
 import subprocess
 from typing import NoReturn
 
-from apple_mail_fast_mcp.exceptions import (
+from apple_mail_mcp.exceptions import (
     MailKeychainAccessDeniedError,
     MailKeychainEntryNotFoundError,
     MailKeychainError,
 )
-from apple_mail_fast_mcp.secret_file import SecretFileError, read_secret_file
+from apple_mail_mcp.secret_file import SecretFileError, read_secret_file
 
 logger = logging.getLogger(__name__)
 

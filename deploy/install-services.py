@@ -98,7 +98,7 @@ save(
     job(
         mail,
         [
-            str(root / ".venv/bin/apple-mail-fast-mcp"),
+            str(root / ".venv/bin/apple-mail-mcp"),
             "--transport",
             "http",
             "--listen-host",
@@ -121,7 +121,7 @@ save(
         [
             str(root / ".venv/bin/python"),
             "-m",
-            "apple_mail_fast_mcp.junk_automation.cleaner",
+            "apple_mail_mcp.junk_automation.cleaner",
             "--interval",
             "30",
         ],

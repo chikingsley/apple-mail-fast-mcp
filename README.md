@@ -22,3 +22,7 @@ This is the sole active Mail repository and has independent Git metadata. The un
 ## Source organization
 
 See [repository layout and provenance](docs/REPOSITORY_LAYOUT.md) for directory responsibilities, dependency pins, licensing and deployment boundaries.
+
+## Current shared deployment
+
+Both services run from reviewed fixed release directories under `~/.local/share/peacockery/`, using Python 3.14.7. The shared client installer and fleet command live in `../apple-mail-global/deploy`. The installer configures Mail, Calendar and Beeper together in installed agent applications. Run `uv run python deploy/communications-fleet.py install --all` from the Mail source repository.

@@ -1,6 +1,6 @@
 # Client/server parity
 
-Every public method on `AppleMailConnector` must either be exposed as an MCP tool in `server.py` or appear in the explicit intentionally-internal set in [`check_client_server_parity.py`](../../src/apple_mail_fast_mcp/check_client_server_parity.py).
+Every public method on `AppleMailConnector` must either be exposed as an MCP tool in `server.py` or appear in the explicit intentionally-internal set in [`check_client_server_parity.py`](../../src/apple_mail_mcp/check_client_server_parity.py).
 
 Run the check directly with:
 

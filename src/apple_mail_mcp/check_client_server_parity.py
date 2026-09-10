@@ -6,8 +6,8 @@ import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CONNECTOR = ROOT / "src/apple_mail_fast_mcp/mail_connector.py"
-SERVER = ROOT / "src/apple_mail_fast_mcp/server.py"
+CONNECTOR = ROOT / "src/apple_mail_mcp/mail_connector.py"
+SERVER = ROOT / "src/apple_mail_mcp/server.py"
 
 INTENTIONALLY_INTERNAL = {
     "auto_template_vars",

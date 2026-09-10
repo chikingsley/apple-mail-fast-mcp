@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from apple_mail_fast_mcp.mail_connector import _MAILBOX_RESOLVER_HANDLERS
-from apple_mail_fast_mcp.native_drafts import (
+from apple_mail_mcp.mail_connector import _MAILBOX_RESOLVER_HANDLERS
+from apple_mail_mcp.native_drafts import (
     _COMPOSE_LOCK,
     NativeDraftError,
     create_native_draft,
@@ -55,7 +55,7 @@ def test_regression_busy_compose_never_waits_then_creates_after_timeout():
 
 def test_regression_expired_pipeline_never_starts_next_mutation(monkeypatch):
     """Regression: a slow preflight must not start a draft after the total budget expires."""
-    from apple_mail_fast_mcp import native_drafts
+    from apple_mail_mcp import native_drafts
 
     clock = iter([0.0, 0.0, 31.0])
     monkeypatch.setattr(native_drafts, "monotonic", lambda: next(clock))
@@ -133,7 +133,7 @@ def test_regression_ambiguous_save_returns_composer_without_guessing_draft():
 @pytest.mark.asyncio
 async def test_regression_public_create_uses_native_defaults(monkeypatch, tmp_path):
     """Regression: the public operation must preserve the user's Mail defaults."""
-    from apple_mail_fast_mcp import server
+    from apple_mail_mcp import server
 
     fake_mail = MagicMock()
     fake_mail.create_draft.return_value = {"draft_id": "123", "sent_message_id": ""}
@@ -142,6 +142,7 @@ async def test_regression_public_create_uses_native_defaults(monkeypatch, tmp_pa
     result = await server.create_draft(
         reply_to="42", seed_mailbox="Archive/Vendors/Piping", from_account="CICA", body="Hi Scott"
     )
+    assert isinstance(result, dict)
     assert result["success"]
     assert fake_mail.create_draft.call_args.kwargs["composition_mode"] == "mail_defaults"
     assert result["details"]["verification_status"] == "unverified"
@@ -150,7 +151,7 @@ async def test_regression_public_create_uses_native_defaults(monkeypatch, tmp_pa
 @pytest.mark.asyncio
 async def test_regression_failed_replacement_keeps_original(monkeypatch, tmp_path):
     """Regression: failed recreation must not delete the original draft."""
-    from apple_mail_fast_mcp import server
+    from apple_mail_mcp import server
 
     fake_mail = MagicMock()
     fake_mail.get_draft_state.return_value = {
@@ -167,6 +168,7 @@ async def test_regression_failed_replacement_keeps_original(monkeypatch, tmp_pat
     monkeypatch.setattr(server, "mail", fake_mail)
     monkeypatch.setenv("APPLE_MAIL_MCP_HOME", str(tmp_path))
     result = await server.update_draft("123", body="new")
+    assert isinstance(result, dict)
     assert not result["success"]
     fake_mail.delete_draft.assert_not_called()
 
@@ -174,7 +176,7 @@ async def test_regression_failed_replacement_keeps_original(monkeypatch, tmp_pat
 @pytest.mark.asyncio
 async def test_regression_rich_update_refuses_to_flatten_original(monkeypatch, tmp_path):
     """Regression: updates must not silently strip HTML, signatures, or quotation."""
-    from apple_mail_fast_mcp import server
+    from apple_mail_mcp import server
 
     fake_mail = MagicMock()
     fake_mail.get_draft_state.return_value = {
@@ -188,6 +190,7 @@ async def test_regression_rich_update_refuses_to_flatten_original(monkeypatch, t
     monkeypatch.setattr(server, "mail", fake_mail)
     monkeypatch.setenv("APPLE_MAIL_MCP_HOME", str(tmp_path))
     result = await server.update_draft("123", body="new")
+    assert isinstance(result, dict)
     assert result["error_type"] == "native_update_required"
     fake_mail.delete_draft.assert_not_called()
     fake_mail.create_draft.assert_not_called()

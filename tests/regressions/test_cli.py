@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from imapclient.exceptions import LoginError
 
-from apple_mail_fast_mcp.cli import run_setup_imap
+from apple_mail_mcp.cli import run_setup_imap
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -87,7 +87,7 @@ class TestSetupHappyPath:
         the right Apple ID but the resolver swapped in an SMTP-only From
         alias the IMAP server rejected. (#201)
         """
-        from apple_mail_fast_mcp import cli as cli_mod
+        from apple_mail_mcp import cli as cli_mod
 
         set_calls: list[tuple[str, str, str]] = []
         monkeypatch.setattr(
@@ -164,7 +164,7 @@ class TestLoginOverride:
         """The #341 shape: iCloud host, non-Apple login, no --email, login
         rejected → the error suggests re-running with --email.
         """
-        from apple_mail_fast_mcp import cli as cli_mod
+        from apple_mail_mcp import cli as cli_mod
 
         monkeypatch.setattr(cli_mod, "set_imap_password", lambda a, e, p: None)
         monkeypatch.setattr(cli_mod, "delete_imap_password", lambda a, e: None)

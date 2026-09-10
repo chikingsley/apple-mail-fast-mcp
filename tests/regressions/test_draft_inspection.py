@@ -7,13 +7,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apple_mail_fast_mcp.draft_inspection import (
+from apple_mail_mcp.draft_inspection import (
     inspect_message_source,
     inspect_saved_message,
     read_saved_message_source,
 )
-from apple_mail_fast_mcp.mail_connector import AppleMailConnector
-from apple_mail_fast_mcp.thread_inspection import get_scoped_thread
+from apple_mail_mcp.mail_connector import AppleMailConnector
+from apple_mail_mcp.thread_inspection import get_scoped_thread
 
 
 def test_regression_public_inspection_uses_registered_read_rate_tier():
@@ -21,7 +21,7 @@ def test_regression_public_inspection_uses_registered_read_rate_tier():
 
     Exercise the real public rate gate while replacing only the native I/O.
     """
-    from apple_mail_fast_mcp import server
+    from apple_mail_mcp import server
 
     with patch.object(server, "inspect_saved_message", return_value={"success": True}) as read:
         result = server.inspect_draft("42", account="Work", mailbox="Drafts")
@@ -230,7 +230,7 @@ def test_regression_catalog_attachment_does_not_block_signature_inspection():
 
 def test_regression_oversized_source_rejected_before_mime_parse(monkeypatch):
     """Regression: lifting the E20 source cap must preserve an explicit bounded failure."""
-    import apple_mail_fast_mcp.draft_inspection as inspection
+    import apple_mail_mcp.draft_inspection as inspection
 
     monkeypatch.setattr(inspection, "_MAX_SOURCE_CHARS", 100)
     result = inspect_message_source("To: a@example.test\n\n" + "x" * 100)
@@ -407,7 +407,7 @@ async def test_regression_unknown_mime_update_cannot_reconstruct_original(
     monkeypatch, tmp_path, mime_type
 ):
     """Regression: absent source type must not authorize a potentially lossy rebuild."""
-    from apple_mail_fast_mcp import server
+    from apple_mail_mcp import server
 
     fake_mail = MagicMock()
     state = {
@@ -423,6 +423,7 @@ async def test_regression_unknown_mime_update_cannot_reconstruct_original(
     monkeypatch.setattr(server, "mail", fake_mail)
     monkeypatch.setenv("APPLE_MAIL_MCP_HOME", str(tmp_path))
     result = await server.update_draft("123", body="new")
+    assert isinstance(result, dict)
     assert result["error_type"] == "native_update_required"
     fake_mail.create_draft.assert_not_called()
     fake_mail.delete_draft.assert_not_called()

@@ -9,7 +9,7 @@ from email import message_from_bytes
 from email.policy import default as _default_policy
 from unittest.mock import MagicMock, patch
 
-from apple_mail_fast_mcp.smtp_sender import SmtpSender
+from apple_mail_mcp.smtp_sender import SmtpSender
 
 
 def _raw_with_bcc() -> bytes:
@@ -25,7 +25,7 @@ def _raw_with_bcc() -> bytes:
 
 
 class TestStartTls:
-    @patch("apple_mail_fast_mcp.smtp_sender.smtplib.SMTP")
+    @patch("apple_mail_mcp.smtp_sender.smtplib.SMTP")
     def test_envelope_from_is_message_from_not_login_and_recipients_explicit(
         self, mock_smtp: MagicMock
     ) -> None:
@@ -51,7 +51,7 @@ class TestStartTls:
 
 
 class TestValidation:
-    @patch("apple_mail_fast_mcp.smtp_sender.smtplib.SMTP")
+    @patch("apple_mail_mcp.smtp_sender.smtplib.SMTP")
     def test_wire_message_is_parseable(self, mock_smtp: MagicMock) -> None:
         """Regression guard: the object handed to send_message is a real
         parsed EmailMessage, not the raw bytes.

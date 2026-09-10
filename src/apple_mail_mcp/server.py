@@ -5,7 +5,9 @@ FastMCP server for Apple Mail integration.
 import argparse
 import atexit
 import contextlib
+import hashlib
 import hmac
+import json
 import logging
 import os
 import sys
@@ -17,6 +19,7 @@ from typing import Annotated, Any, TypeVar, cast
 import uvicorn
 from fastmcp import Context, FastMCP
 from fastmcp.server.elicitation import AcceptedElicitation
+from mcp.types import ElicitRequest, ElicitRequestFormParams, ElicitResult, InputRequiredResult
 from pydantic import BeforeValidator
 
 from .cli import run_setup_imap
@@ -215,7 +218,7 @@ mail = AppleMailConnector(
 
 async def _elicit_confirmation(
     ctx: Context | None, summary: str, operation: str, params: dict[str, Any]
-) -> dict[str, Any] | None:
+) -> dict[str, Any] | InputRequiredResult | None:
     """Elicit user confirmation via MCP. Fails closed — confirmation gates
     the destructive operation entirely.
 
@@ -245,6 +248,39 @@ async def _elicit_confirmation(
             ),
             "error_type": "confirmation_required",
         }
+    request_context = ctx.request_context
+    if request_context is not None and request_context.protocol_version >= "2026-07-28":
+        fingerprint = hashlib.sha256(
+            json.dumps([operation, params, summary], sort_keys=True, default=str).encode()
+        ).hexdigest()
+        key = "confirm_" + fingerprint
+        responses = ctx.input_responses or {}
+        if ctx.request_state != fingerprint or key not in responses:
+            return InputRequiredResult(
+                result_type="input_required",
+                request_state=fingerprint,
+                input_requests={
+                    key: ElicitRequest(
+                        method="elicitation/create",
+                        params=ElicitRequestFormParams(
+                            message=summary,
+                            requested_schema={
+                                "type": "object",
+                                "properties": {"confirm": {"type": "boolean", "title": "Confirm"}},
+                                "required": ["confirm"],
+                            },
+                        ),
+                    )
+                },
+            )
+        answer = responses[key]
+        if (
+            isinstance(answer, ElicitResult)
+            and answer.action == "accept"
+            and (answer.content or {}).get("confirm") is True
+        ):
+            return None
+        return {"success": False, "error": "User declined to continue", "error_type": "cancelled"}
     try:
         # FastMCP's published overloads collapse this call to the
         # response_type=None variant for static analyzers. At runtime it wraps
@@ -404,7 +440,7 @@ def _rule_actions_require_confirmation(actions: dict[str, Any]) -> bool:
 async def delete_rule(
     rule_index: int,
     ctx: Context | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | InputRequiredResult:
     """
     Delete a Mail.app rule by 1-based positional index.
 
@@ -483,7 +519,7 @@ async def create_rule(
     match_logic: str = "all",
     enabled: bool = True,
     ctx: Context | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | InputRequiredResult:
     """
     Create a new Mail.app rule.
 
@@ -593,7 +629,7 @@ async def update_rule(
     actions: AnyDict | None = None,
     match_logic: str | None = None,
     ctx: Context | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | InputRequiredResult:
     """
     Update an existing Mail.app rule (patch semantics).
 
@@ -2226,7 +2262,7 @@ async def delete_mailbox(
     name: str,
     delete_messages: bool = False,
     ctx: Context | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | InputRequiredResult:
     """Delete a mailbox via IMAP.
 
     Mail.app's AppleScript dictionary doesn't expose a working delete
@@ -2361,7 +2397,7 @@ async def delete_messages(
     account: str | None = None,
     source_mailbox: str | None = None,
     ctx: Context | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | InputRequiredResult:
     """
     Delete messages (always moves to the account's Trash mailbox).
 
@@ -2631,7 +2667,9 @@ def save_template(name: str, body: str, subject: str | None = None) -> dict[str,
     {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True},
     mutating=True,
 )
-async def delete_template(name: str, ctx: Context | None = None) -> dict[str, Any]:
+async def delete_template(
+    name: str, ctx: Context | None = None
+) -> dict[str, Any] | InputRequiredResult:
     """Delete a template by name.
 
     Destructive — requires user confirmation via MCP elicitation before
@@ -3001,7 +3039,7 @@ async def _run_send_now_gates(
     *,
     validate_recipient_shape: bool = False,
     validate_args: tuple[Any, ...] = (),
-) -> dict[str, Any] | None:
+) -> dict[str, Any] | InputRequiredResult | None:
     """Run the standard send_now gate chain (#191):
 
     1. ``check_test_mode_safety(operation, recipients=recipients)``
@@ -3136,7 +3174,7 @@ async def create_draft(
     send_now: bool = False,
     composition_mode: str = "mail_defaults",
     ctx: Context | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | InputRequiredResult:
     """Create a draft (fresh, reply, or forward). Optionally send immediately.
 
     Mail.app's actual primitive is the draft — every outgoing message is
@@ -3367,7 +3405,7 @@ async def update_draft(
     from_account: str | None = None,
     send_now: bool = False,
     ctx: Context | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | InputRequiredResult:
     """Update a supported plain fresh draft, creating its replacement first.
 
     **Returns a NEW draft_id** — Mail.app forbids mutating saved drafts,
@@ -3709,7 +3747,7 @@ def _load_http_bearer_token(*, token_file: str | None, token_env: str) -> str:
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="apple-mail-fast-mcp",
+        prog="apple-mail-mcp",
         description=(
             "Apple Mail MCP server. With no subcommand, starts the MCP "
             "server (this is what Claude Desktop / mcp clients invoke)."

@@ -10,12 +10,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apple_mail_fast_mcp.exceptions import MailKeychainEntryNotFoundError
-from apple_mail_fast_mcp.local_db_connector import (
+from apple_mail_mcp.exceptions import MailKeychainEntryNotFoundError
+from apple_mail_mcp.local_db_connector import (
     LocalDbConnector,
     LocalDbUnsupportedQueryError,
 )
-from apple_mail_fast_mcp.mail_connector import AppleMailConnector
+from apple_mail_mcp.mail_connector import AppleMailConnector
 
 
 def _create_envelope_index(path: Path) -> None:

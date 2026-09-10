@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.14"
-# dependencies = ["fastmcp==3.4.5"]
+# dependencies = ["fastmcp==4.0.3"]
 # ///
 """Portable stdio adapter: credentials are read from disk, never shell startup."""
 
@@ -10,13 +10,13 @@ import stat
 import sys
 from pathlib import Path
 
-from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server import create_proxy
 
 root = Path.home() / ".config/peacockery-communications"
 service = sys.argv[1]
-if service not in {"apple-mail", "beeper"}:
-    raise SystemExit("Choose apple-mail or beeper")
+if service not in {"apple-mail", "apple-calendar", "beeper"}:
+    raise SystemExit("Choose apple-mail, apple-calendar or beeper")
 config = json.loads((root / "endpoints.json").read_text())
 token_path = root / "service-token"
 if token_path.is_symlink():
@@ -31,7 +31,7 @@ with os.fdopen(os.open(token_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))) 
 if len(token) < 32:
     raise SystemExit("Service token is missing or invalid")
 proxy = create_proxy(
-    Client(config[service], auth=token, timeout=90),
+    StreamableHttpTransport(config[service], auth=token),
     name=service,
     provider_error_strategy="raise",
 )

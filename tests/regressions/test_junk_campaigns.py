@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-from apple_mail_fast_mcp.junk_campaigns import (
+from apple_mail_mcp.junk_campaigns import (
     JunkCampaignStore,
     fingerprint_sender,
     looks_generated_local_part,

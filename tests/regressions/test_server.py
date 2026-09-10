@@ -1,5 +1,5 @@
 """
-Unit tests for the FastMCP server layer in apple_mail_fast_mcp.server.
+Unit tests for the FastMCP server layer in apple_mail_mcp.server.
 
 These tests exercise each @mcp.tool() function directly as a regular Python
 callable with a mocked AppleMailConnector. They cover server-layer concerns
@@ -19,7 +19,7 @@ from fastmcp.server.elicitation import (
     DeclinedElicitation,
 )
 
-from apple_mail_fast_mcp.server import (
+from apple_mail_mcp.server import (
     _elicit_confirmation,
     create_rule,
     delete_messages,
@@ -32,13 +32,13 @@ from apple_mail_fast_mcp.server import (
 
 @pytest.fixture
 def mock_mail() -> Any:
-    with patch("apple_mail_fast_mcp.server.mail") as m:
+    with patch("apple_mail_mcp.server.mail") as m:
         yield m
 
 
 @pytest.fixture
 def mock_logger() -> Any:
-    with patch("apple_mail_fast_mcp.server.operation_logger") as m:
+    with patch("apple_mail_mcp.server.operation_logger") as m:
         yield m
 
 
@@ -49,6 +49,8 @@ def mock_ctx_accept() -> MagicMock:
     pattern (#282) only an explicit ``True`` proceeds.
     """
     ctx = MagicMock()
+    ctx.request_context = None
+
     ctx.elicit = AsyncMock(return_value=AcceptedElicitation(data=True))
     return ctx
 
@@ -60,6 +62,8 @@ def mock_ctx_accept_false() -> MagicMock:
     same as a decline (#282).
     """
     ctx = MagicMock()
+    ctx.request_context = None
+
     ctx.elicit = AsyncMock(return_value=AcceptedElicitation(data=False))
     return ctx
 
@@ -68,6 +72,8 @@ def mock_ctx_accept_false() -> MagicMock:
 def mock_ctx_decline() -> MagicMock:
     """Mock MCP Context that declines elicitation."""
     ctx = MagicMock()
+    ctx.request_context = None
+
     ctx.elicit = AsyncMock(return_value=DeclinedElicitation())
     return ctx
 
@@ -78,6 +84,8 @@ def mock_ctx_raise() -> MagicMock:
     doesn't implement the elicitation capability — #226).
     """
     ctx = MagicMock()
+    ctx.request_context = None
+
     ctx.elicit = AsyncMock(side_effect=RuntimeError("not supported"))
     return ctx
 
@@ -113,6 +121,7 @@ class TestElicitConfirmationFailsClosed:
             params={"k": "v"},
         )
         assert result is not None
+        assert isinstance(result, dict)
         assert result["success"] is False
         assert result["error_type"] == "cancelled"
 
@@ -171,6 +180,7 @@ class TestDeleteRule:
             {"index": 1, "name": "Junk filter", "enabled": True},
         ]
         result = await delete_rule(rule_index=1, ctx=mock_ctx_accept_false)
+        assert isinstance(result, dict)
         assert result["success"] is False
         assert result["error_type"] == "cancelled"
         mock_mail.delete_rule.assert_not_called()
@@ -187,6 +197,7 @@ class TestDeleteRule:
             {"index": 1, "name": "Junk filter", "enabled": True},
         ]
         result = await delete_rule(rule_index=1, ctx=None)
+        assert isinstance(result, dict)
         assert result["success"] is False
         assert result["error_type"] == "confirmation_required"
         mock_mail.delete_rule.assert_not_called()
@@ -221,6 +232,7 @@ class TestCreateRule:
             actions=actions,
             ctx=mock_ctx_accept,
         )
+        assert isinstance(result, dict)
         assert result["success"] is True
         mock_ctx_accept.elicit.assert_awaited_once()
         mock_mail.create_rule.assert_called_once()
@@ -415,7 +427,7 @@ class TestUpdateMailboxTool:
 
     def test_move_only_success(self, mock_mail: MagicMock, mock_logger: MagicMock) -> None:
         """#163: new_parent set, new_name None — pure move via IMAP."""
-        from apple_mail_fast_mcp.server import update_mailbox
+        from apple_mail_mcp.server import update_mailbox
 
         mock_mail.update_mailbox.return_value = True
         result = update_mailbox(account="Gmail", name="A/B", new_parent="C")
@@ -433,10 +445,10 @@ class TestUpdateMailboxTool:
         """#164: source path under ``[Gmail]/`` returns
         ``error_type: "unsupported_gmail_system_label"``.
         """
-        from apple_mail_fast_mcp.exceptions import (
+        from apple_mail_mcp.exceptions import (
             MailUnsupportedGmailSystemLabelError,
         )
-        from apple_mail_fast_mcp.server import update_mailbox
+        from apple_mail_mcp.server import update_mailbox
 
         mock_mail.update_mailbox.side_effect = MailUnsupportedGmailSystemLabelError(
             "cannot update Gmail system label '[Gmail]/Drafts'"
@@ -454,10 +466,10 @@ class TestUpdateMailboxTool:
         self, mock_mail: MagicMock, mock_logger: MagicMock
     ) -> None:
         """#164: destination under ``[Gmail]/`` (via new_parent) maps too."""
-        from apple_mail_fast_mcp.exceptions import (
+        from apple_mail_mcp.exceptions import (
             MailUnsupportedGmailSystemLabelError,
         )
-        from apple_mail_fast_mcp.server import update_mailbox
+        from apple_mail_mcp.server import update_mailbox
 
         mock_mail.update_mailbox.side_effect = MailUnsupportedGmailSystemLabelError(
             "destination would land in Gmail's system-label namespace"
@@ -483,10 +495,10 @@ class TestDeleteMailboxTool:
         """#164: deleting a ``[Gmail]/`` path returns
         ``error_type: "unsupported_gmail_system_label"``.
         """
-        from apple_mail_fast_mcp.exceptions import (
+        from apple_mail_mcp.exceptions import (
             MailUnsupportedGmailSystemLabelError,
         )
-        from apple_mail_fast_mcp.server import delete_mailbox
+        from apple_mail_mcp.server import delete_mailbox
 
         mock_mail.delete_mailbox.side_effect = MailUnsupportedGmailSystemLabelError(
             "cannot delete Gmail system label '[Gmail]/Trash'"
@@ -496,6 +508,7 @@ class TestDeleteMailboxTool:
             name="[Gmail]/Trash",
             ctx=mock_ctx_accept,
         )
+        assert isinstance(result, dict)
         assert result["success"] is False
         assert result["error_type"] == "unsupported_gmail_system_label"
         assert "Gmail" in result["error"]
@@ -517,6 +530,7 @@ class TestDeleteMessages:
         """
         mock_mail.delete_messages.return_value = 1
         result = await delete_messages(["1"], permanent=True, ctx=mock_ctx_accept)
+        assert isinstance(result, dict)
         assert result["success"] is True
         # Server still echoes the (now-meaningless) flag in its response
         # for backwards compatibility with existing callers.
@@ -538,7 +552,7 @@ class TestDeleteMessages:
 @pytest.fixture
 def tight_limits() -> Any:
     """Monkeypatch TIER_LIMITS down to 2 calls/60s so we can trip them easily."""
-    import apple_mail_fast_mcp.security as sec
+    import apple_mail_mcp.security as sec
 
     original = sec.TIER_LIMITS.copy()
     sec.TIER_LIMITS.update(
@@ -581,15 +595,15 @@ class TestCreateDraftTool:
     def stub_security(self, monkeypatch: Any) -> None:
         # Default: safety + rate-limit pass; recipient-validation passes.
         monkeypatch.setattr(
-            "apple_mail_fast_mcp.server.check_test_mode_safety",
+            "apple_mail_mcp.server.check_test_mode_safety",
             lambda *a, **kw: None,
         )
         monkeypatch.setattr(
-            "apple_mail_fast_mcp.server.check_rate_limit",
+            "apple_mail_mcp.server.check_rate_limit",
             lambda *a, **kw: None,
         )
         monkeypatch.setattr(
-            "apple_mail_fast_mcp.server.validate_send_operation",
+            "apple_mail_mcp.server.validate_send_operation",
             lambda *a, **kw: (True, None),
         )
 
@@ -603,7 +617,7 @@ class TestCreateDraftTool:
         """#251: body_html is passed through to the connector for a fresh
         save-as-draft.
         """
-        from apple_mail_fast_mcp.server import create_draft
+        from apple_mail_mcp.server import create_draft
 
         mock_mail.create_draft.return_value = {"draft_id": "161099", "sent_message_id": ""}
         result = await create_draft(
@@ -612,6 +626,7 @@ class TestCreateDraftTool:
             body="plain",
             body_html="<p>rich</p>",
         )
+        assert isinstance(result, dict)
         assert result["success"] is True
         kwargs = mock_mail.create_draft.call_args.kwargs
         assert kwargs["body_html"] == "<p>rich</p>"
@@ -626,7 +641,7 @@ class TestCreateDraftTool:
         """#251: no HTML send path — body_html + send_now is a
         validation_error and never reaches the connector.
         """
-        from apple_mail_fast_mcp.server import create_draft
+        from apple_mail_mcp.server import create_draft
 
         result = await create_draft(
             to=["a@example.com"],
@@ -634,6 +649,7 @@ class TestCreateDraftTool:
             body_html="<p>rich</p>",
             send_now=True,
         )
+        assert isinstance(result, dict)
         assert result["success"] is False
         assert result["error_type"] == "validation_error"
         mock_mail.create_draft.assert_not_called()
@@ -648,12 +664,13 @@ class TestCreateDraftTool:
         """#251: HTML reply/forward is out of scope — rejected as a
         validation_error before the connector.
         """
-        from apple_mail_fast_mcp.server import create_draft
+        from apple_mail_mcp.server import create_draft
 
         result = await create_draft(
             reply_to="160989",
             body_html="<p>rich</p>",
         )
+        assert isinstance(result, dict)
         assert result["success"] is False
         assert result["error_type"] == "validation_error"
         mock_mail.create_draft.assert_not_called()
@@ -668,8 +685,8 @@ class TestCreateDraftTool:
         """#251: the connector's fail-loud exception surfaces as
         error_type 'html_requires_imap'.
         """
-        from apple_mail_fast_mcp.exceptions import MailDraftHtmlUnavailableError
-        from apple_mail_fast_mcp.server import create_draft
+        from apple_mail_mcp.exceptions import MailDraftHtmlUnavailableError
+        from apple_mail_mcp.server import create_draft
 
         mock_mail.create_draft.side_effect = MailDraftHtmlUnavailableError(
             "HTML drafts require IMAP credentials"
@@ -679,6 +696,7 @@ class TestCreateDraftTool:
             subject="hi",
             body_html="<p>rich</p>",
         )
+        assert isinstance(result, dict)
         assert result["success"] is False
         assert result["error_type"] == "html_requires_imap"
 
@@ -695,8 +713,8 @@ class TestCreateDraftTool:
         gate never saw; the server surfaces it as a safety_violation, not a
         generic ``unknown`` error.
         """
-        from apple_mail_fast_mcp.exceptions import MailSafetyError
-        from apple_mail_fast_mcp.server import create_draft
+        from apple_mail_mcp.exceptions import MailSafetyError
+        from apple_mail_mcp.server import create_draft
 
         mock_mail.create_draft.side_effect = MailSafetyError(
             "Test mode: recipients must use RFC 2606 reserved domains"
@@ -708,6 +726,7 @@ class TestCreateDraftTool:
             send_now=True,
             ctx=mock_ctx_accept,
         )
+        assert isinstance(result, dict)
         assert result["success"] is False
         assert result["error_type"] == "safety_violation"
 
@@ -723,7 +742,7 @@ class TestCreateDraftTool:
         confirmation_required error rather than completing the send
         when no ctx is supplied.
         """
-        from apple_mail_fast_mcp.server import create_draft
+        from apple_mail_mcp.server import create_draft
 
         result = await create_draft(
             to=["a@example.com"],
@@ -732,6 +751,7 @@ class TestCreateDraftTool:
             send_now=True,
             ctx=None,
         )
+        assert isinstance(result, dict)
         assert result["success"] is False
         assert result["error_type"] == "confirmation_required"
         mock_mail.create_draft.assert_not_called()
@@ -741,11 +761,11 @@ class TestUpdateDraftTool:
     @pytest.fixture(autouse=True)
     def stub_security(self, monkeypatch: Any) -> None:
         monkeypatch.setattr(
-            "apple_mail_fast_mcp.server.check_test_mode_safety",
+            "apple_mail_mcp.server.check_test_mode_safety",
             lambda *a, **kw: None,
         )
         monkeypatch.setattr(
-            "apple_mail_fast_mcp.server.check_rate_limit",
+            "apple_mail_mcp.server.check_rate_limit",
             lambda *a, **kw: None,
         )
 
@@ -759,7 +779,7 @@ class TestUpdateDraftTool:
         """#251: body_html threads to the recreated draft when the seed is a
         fresh draft.
         """
-        from apple_mail_fast_mcp.server import update_draft
+        from apple_mail_mcp.server import update_draft
 
         mock_mail.get_draft_state.return_value = {
             "draft_id": "160991",
@@ -776,6 +796,7 @@ class TestUpdateDraftTool:
         mock_mail.delete_draft.return_value = True
         mock_mail.create_draft.return_value = {"draft_id": "161000", "sent_message_id": ""}
         result = await update_draft(draft_id="160991", body_html="<p>rich</p>")
+        assert isinstance(result, dict)
         assert result["success"] is True
         kwargs = mock_mail.create_draft.call_args.kwargs
         assert kwargs["seed"] == "new"
@@ -791,8 +812,8 @@ class TestUpdateDraftTool:
         """#251: HTML reply/forward drafts are out of scope — reject and
         leave the existing draft untouched (no delete/recreate).
         """
-        from apple_mail_fast_mcp.drafts import DraftStateStore, SeedRecord
-        from apple_mail_fast_mcp.server import update_draft
+        from apple_mail_mcp.drafts import DraftStateStore, SeedRecord
+        from apple_mail_mcp.server import update_draft
 
         store = DraftStateStore()
         store.set_seed(
@@ -811,6 +832,7 @@ class TestUpdateDraftTool:
             "attachment_names": [],
         }
         result = await update_draft(draft_id="160991", body_html="<p>rich</p>")
+        assert isinstance(result, dict)
         assert result["success"] is False
         assert result["error_type"] == "validation_error"
         mock_mail.delete_draft.assert_not_called()
@@ -828,15 +850,15 @@ class TestDraftToolErrorPaths:
     @pytest.fixture(autouse=True)
     def stub_security(self, monkeypatch: Any) -> None:
         monkeypatch.setattr(
-            "apple_mail_fast_mcp.server.check_test_mode_safety",
+            "apple_mail_mcp.server.check_test_mode_safety",
             lambda *a, **kw: None,
         )
         monkeypatch.setattr(
-            "apple_mail_fast_mcp.server.check_rate_limit",
+            "apple_mail_mcp.server.check_rate_limit",
             lambda *a, **kw: None,
         )
         monkeypatch.setattr(
-            "apple_mail_fast_mcp.server.validate_send_operation",
+            "apple_mail_mcp.server.validate_send_operation",
             lambda *a, **kw: (True, None),
         )
 
@@ -859,14 +881,14 @@ class TestDraftToolErrorPaths:
         the new server-side guard removal + security-side empty-recipients
         reject combine to close the gap.
         """
-        from apple_mail_fast_mcp.security import (
+        from apple_mail_mcp.security import (
             check_test_mode_safety as real_check,
         )
-        from apple_mail_fast_mcp.server import create_draft
+        from apple_mail_mcp.server import create_draft
 
         # Restore the real check_test_mode_safety (the class-level
         # autouse `stub_security` fixture replaced it with a no-op).
-        monkeypatch.setattr("apple_mail_fast_mcp.server.check_test_mode_safety", real_check)
+        monkeypatch.setattr("apple_mail_mcp.server.check_test_mode_safety", real_check)
         monkeypatch.setenv("MAIL_TEST_MODE", "true")
         monkeypatch.setenv("MAIL_TEST_ACCOUNT", "TestAccount")
 
@@ -878,6 +900,7 @@ class TestDraftToolErrorPaths:
             send_now=True,
             ctx=mock_ctx_accept,
         )
+        assert isinstance(result, dict)
         assert result["error_type"] == "safety_violation"
         assert "explicit recipients" in result["error"]
         mock_mail.create_draft.assert_not_called()
@@ -894,14 +917,14 @@ class TestDraftToolErrorPaths:
         """#175: same gap on update_draft's send path — closed by the
         same fix.
         """
-        from apple_mail_fast_mcp.security import (
+        from apple_mail_mcp.security import (
             check_test_mode_safety as real_check,
         )
-        from apple_mail_fast_mcp.server import update_draft
+        from apple_mail_mcp.server import update_draft
 
         # Restore the real check_test_mode_safety (the class-level
         # autouse `stub_security` fixture replaced it with a no-op).
-        monkeypatch.setattr("apple_mail_fast_mcp.server.check_test_mode_safety", real_check)
+        monkeypatch.setattr("apple_mail_mcp.server.check_test_mode_safety", real_check)
         monkeypatch.setenv("MAIL_TEST_MODE", "true")
         monkeypatch.setenv("MAIL_TEST_ACCOUNT", "TestAccount")
 
@@ -925,6 +948,7 @@ class TestDraftToolErrorPaths:
         )
         # Native replies are now rejected before any send or confirmation gate:
         # the legacy update cannot preserve their rich quote/signature structure.
+        assert isinstance(result, dict)
         assert result["error_type"] == "native_update_required"
         mock_mail.create_draft.assert_not_called()
         mock_mail.delete_draft.assert_not_called()

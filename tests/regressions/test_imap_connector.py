@@ -8,8 +8,8 @@ import pytest
 from imapclient.exceptions import IMAPClientError
 from imapclient.response_types import Address, Envelope
 
-from apple_mail_fast_mcp.exceptions import MailMailboxNotFoundError
-from apple_mail_fast_mcp.imap_connector import ImapConnector
+from apple_mail_mcp.exceptions import MailMailboxNotFoundError
+from apple_mail_mcp.imap_connector import ImapConnector
 
 type FolderListing = list[tuple[tuple[bytes, ...], bytes, str]]
 
@@ -75,7 +75,7 @@ _BS_PLAIN_TEXT_LEAF = (
 class TestMailboxSelectionErrors:
     """A caller typo stays local and never masquerades as account failure."""
 
-    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    @patch("apple_mail_mcp.imap_connector.IMAPClient")
     def test_nonexistent_mailbox_is_typed_input_error(self, mock_cls: MagicMock) -> None:
         """Regression: NONEXISTENT identifies a bad mailbox, not an account outage."""
         client = mock_cls.return_value
@@ -120,7 +120,7 @@ class TestLimitWithHasAttachmentFilter:
         mock_client.fetch.side_effect = lambda chunk, keys: {uid: full[uid] for uid in chunk}
         return mock_client
 
-    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    @patch("apple_mail_mcp.imap_connector.IMAPClient")
     def test_uid_expunged_between_search_and_fetch_is_skipped(self, mock_cls):
         """A UID the server omits from the FETCH response (expunged by
         another session, RFC 3501 / #314) is skipped within the chunked
@@ -154,7 +154,7 @@ _MULTIPART_WITH_ATTACHMENT = (_LEAF_TEXT, _LEAF_PDF_ATTACHMENT, b"mixed")
 
 
 class TestEnvelopeTranslation:
-    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    @patch("apple_mail_mcp.imap_connector.IMAPClient")
     def test_emits_both_id_and_rfc_message_id_dual_emit(self, mock_cls):
         """#148: every IMAP-path row carries `rfc_message_id` alongside
         `id`. On this path the two are intentionally identical (both
@@ -379,7 +379,7 @@ class TestGetAttachments:
         }
         return client
 
-    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    @patch("apple_mail_mcp.imap_connector.IMAPClient")
     def test_real_imapclient_multipart_list_shape_enumerates_pdf(self, mock_cls: MagicMock) -> None:
         """Regression: IMAPClient groups multipart children in a list at
         position 0. Walking only the bare-tuple shape (as the walker did
@@ -387,7 +387,7 @@ class TestGetAttachments:
         attachment. Uses a BODYSTRUCTURE captured verbatim from real iCloud,
         and also checks the sibling has-attachment walker agrees.
         """
-        from apple_mail_fast_mcp.imap_connector import _bodystructure_has_attachment
+        from apple_mail_mcp.imap_connector import _bodystructure_has_attachment
 
         self._setup_client(mock_cls, bodystructure=_BS_REAL_ICLOUD_MIXED_PDF)
 
@@ -515,7 +515,7 @@ class TestImapDeleteMessages:
             ((b"\\HasNoChildren",), b"/", trash_name),
         ]
 
-    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    @patch("apple_mail_mcp.imap_connector.IMAPClient")
     def test_delete_resolves_trash_before_selecting_source(self, mock_cls: MagicMock) -> None:
         """All LIST traffic must run before SELECT. Some servers
         (Exchange Online, older Dovecot) implicitly CLOSE the selected
@@ -542,7 +542,7 @@ class TestImapDeleteMessages:
             f"select_folder (call #{select_idx}) — see #199"
         )
 
-    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    @patch("apple_mail_mcp.imap_connector.IMAPClient")
     def test_permanent_delete_uses_scoped_uid_expunge(self, mock_cls: MagicMock) -> None:
         """Regression: standard IMAP Junk cleanup must expunge only matched UIDs."""
         client = MagicMock()
@@ -568,7 +568,7 @@ class TestImapSetReadStatus:
     — no capability check needed, no fallback variants.
     """
 
-    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    @patch("apple_mail_mcp.imap_connector.IMAPClient")
     def test_set_read_status_no_capability_check_required(self, mock_cls: MagicMock) -> None:
         """\\Seen is RFC 3501 base IMAP — universal. Don't gate behind
         a capability check (regression guard against accidental
@@ -596,7 +596,7 @@ class TestImapSetFlaggedStatus:
     only handles the no-color case; flag_color goes via AppleScript.
     """
 
-    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    @patch("apple_mail_mcp.imap_connector.IMAPClient")
     def test_set_flagged_status_no_capability_check_required(self, mock_cls: MagicMock) -> None:
         """\\Flagged is RFC 3501 base IMAP — universal. Don't gate
         behind a capability check (regression guard).
@@ -683,7 +683,7 @@ def _fastmail_folder_listing() -> FolderListing:
 class TestFindThreadMembersImapThread:
     """Tier 2 (RFC 5256 THREAD, #123) dispatch."""
 
-    @patch("apple_mail_fast_mcp.imap_connector.IMAPClient")
+    @patch("apple_mail_mcp.imap_connector.IMAPClient")
     def test_thread_command_rejection_falls_through_to_bfs(self, mock_cls: MagicMock) -> None:
         """If client.thread() raises mid-flight (server lied about
         THREAD capability), Tier 2 returns None → BFS runs.

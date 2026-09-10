@@ -11,7 +11,7 @@ The maintained services run on Hochi using FastMCP 4.0.3. Mail exposes 27 operat
 
 Tailscale Serve publishes the routes only within the tailnet. Local clients use loopback because this Mac's Tailscale self-connection fails TLS. Both services require the gateway bearer credential. The underlying Beeper token remains in an owner-only file on Hochi; agents do not initiate separate Beeper OAuth flows. Beeper's own `/v0/mcp` endpoint and `/v1/spec` specification are distinct.
 
-The stdio adapter pins FastMCP 3.4.5 for the established MCP handshake and interactive confirmation protocol. The hosted services use FastMCP 4.0.3. This compatibility boundary prevents modern protocol negotiation from disabling the existing confirmation flow.
+The shared adapter and services use FastMCP 4.0.3. Its proxy negotiates the calling client protocol automatically. Mail supports modern input-required confirmation round trips. Execute mutations as one tool_name/arguments operation; code is reserved for read workflows, so a confirmation retry cannot replay previous writes.
 
 The global `peacockery-mcp` adapter reads `~/.config/peacockery-communications/service-token` and `endpoints.json`. It needs no token environment variable inherited from a shell. Never print these credentials in diagnostics.
 

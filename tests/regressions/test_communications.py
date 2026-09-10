@@ -5,10 +5,12 @@ from unittest.mock import patch
 import pytest
 from fastmcp import Client, Context, FastMCP
 from fastmcp.client.elicitation import ElicitResult
+from fastmcp.server import create_proxy
+from mcp.types import InputRequiredResult
 
-from apple_mail_fast_mcp.code_mode import communications_code_mode
-from apple_mail_fast_mcp.mail_connector import AppleMailConnector
-from apple_mail_fast_mcp.server import _elicit_confirmation
+from apple_mail_mcp.code_mode import communications_code_mode
+from apple_mail_mcp.mail_connector import AppleMailConnector
+from apple_mail_mcp.server import _elicit_confirmation
 
 
 def test_regression_numeric_body_read_retains_scope():
@@ -29,13 +31,15 @@ def test_regression_numeric_body_read_retains_scope():
 
 
 @pytest.mark.asyncio
-async def test_regression_code_mode_preserves_confirmation_and_catalog():
+@pytest.mark.parametrize("mode", ["legacy", "auto"])
+@pytest.mark.parametrize("approved", [False, True])
+async def test_regression_code_mode_preserves_confirmation_and_catalog(mode, approved):
     """Regression: smaller discovery must retain schemas and a declined mutation gate."""
     app = FastMCP("regression", transforms=[communications_code_mode()])
     writes = []
 
     @app.tool
-    async def guarded(ctx: Context) -> dict[str, object]:
+    async def guarded(ctx: Context) -> dict[str, object] | InputRequiredResult:
         error = await _elicit_confirmation(ctx, "Confirm simulated write", "delete_messages", {})
         if error:
             return error
@@ -43,18 +47,21 @@ async def test_regression_code_mode_preserves_confirmation_and_catalog():
         return {"success": True}
 
     async def decline(*args):  # ruff: ignore[unused-async] - async callback required by MCP
-        return ElicitResult(action="decline")
+        return (
+            ElicitResult(action="accept", content={"confirm": True, "value": True})
+            if approved
+            else ElicitResult(action="decline")
+        )
 
-    async with Client(app, elicitation_handler=decline, mode="legacy") as client:
+    async with Client(create_proxy(app), elicitation_handler=decline, mode=mode) as client:
         assert {t.name for t in await client.list_tools()} == {"search", "get_schema", "execute"}
         schema = await client.call_tool("get_schema", {"tools": ["guarded"]})
         assert "guarded" in schema.content[0].text
-        result = await client.call_tool(
-            "execute", {"code": 'return await call_tool("guarded", {})'}
-        )
-        assert result.data["success"] is False
-        assert result.data["error_type"] == "cancelled"
-    assert writes == []
+        result = await client.call_tool("execute", {"tool_name": "guarded", "arguments": {}})
+        assert result.data["success"] is approved
+        if not approved:
+            assert result.data["error_type"] == "cancelled"
+    assert writes == ([True] if approved else [])
 
 
 @pytest.mark.allow_real_io
@@ -63,7 +70,7 @@ def test_regression_attachment_property_error_preserves_message():
     """Regression: Cica reported that a failing MIME property must preserve content and other attachment fields."""
     import json
 
-    from apple_mail_fast_mcp.mail_connector import (
+    from apple_mail_mcp.mail_connector import (
         _attachment_metadata_clause,
         _wrap_as_json_script,
     )
@@ -94,8 +101,8 @@ def test_regression_attachment_property_error_preserves_message():
 
 def test_regression_batch_reports_missing_ids():
     """Regression: Cica partial retrieval must explicitly account for every missing requested ID."""
-    from apple_mail_fast_mcp import server
-    from apple_mail_fast_mcp.exceptions import MailMessageNotFoundError
+    from apple_mail_mcp import server
+    from apple_mail_mcp.exceptions import MailMessageNotFoundError
 
     with patch.object(
         server.mail,
@@ -109,3 +116,45 @@ def test_regression_batch_reports_missing_ids():
     assert result["count"] == 1
     assert result["partial"] is True
     assert result["missing_message_ids"] == ["43"]
+
+
+def test_regression_beeper_watchdog_does_not_reopen_running_app():
+    """Regression: checking Beeper instead of Beeper Desktop stole focus every minute."""
+    import plistlib
+    import runpy
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[2] / "deploy/keep-beeper-running.py"
+    with (
+        patch.object(
+            Path,
+            "read_bytes",
+            return_value=plistlib.dumps({"CFBundleExecutable": "Beeper Desktop"}),
+        ),
+        patch(
+            "subprocess.check_output",
+            return_value="/Applications/Beeper Desktop.app/Contents/MacOS/Beeper Desktop\n",
+        ),
+        patch("subprocess.run") as launch,
+    ):
+        runpy.run_path(str(script))
+    launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_regression_mutating_code_is_rejected_before_execution():
+    """Regression: confirmation retries must never replay an earlier write in a batch."""
+    app = FastMCP("no-replay", transforms=[communications_code_mode()])
+    writes = []
+
+    @app.tool(annotations={"readOnlyHint": False})
+    def mutate():
+        writes.append(True)
+        return {"success": True}
+
+    async with Client(app) as client:
+        result = await client.call_tool(
+            "execute", {"code": 'return await call_tool("mutate", {})'}, raise_on_error=False
+        )
+        assert result.is_error
+    assert writes == []

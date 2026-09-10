@@ -212,7 +212,7 @@ def _configure_remote_windows(host: FleetHost) -> list[str]:
     opencode = remote_executable(host, "opencode")
     if opencode:
         authorization = PureWindowsPath(
-            host.home, ".config", "apple-mail-fast-mcp", "mcp-authorization"
+            host.home, ".config", "apple-mail-mcp", "mcp-authorization"
         ).as_posix()
         _remote_windows(
             host,

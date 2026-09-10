@@ -35,3 +35,5 @@ Installed clients use the global `peacockery-mcp apple-mail` stdio adapter. It r
 If the connector is missing or fails, report the exact failed step. Check the adapter, service, and helper separately. Do not create an independent Mail server or invent provider credentials. The maintained installer and diagnostic commands are documented in `docs/guides/GLOBAL_COMMUNICATIONS.md` in the deployed Apple Mail repository. Existing agent sessions may need their MCP connections reloaded after configuration changes.
 
 An Accessibility check describes the running helper's trust state, not the switch displayed in System Settings. If the user reports it is enabled, investigate the actual resident process, bundle path, signing identity, and OS denial before requesting another toggle. Inspect the visible entry on Hochi when available; do not treat a separately launched diagnostic process as the production helper.
+
+For mutations, call MCP execute with `tool_name` and `arguments`, for example `{"tool_name":"create_draft","arguments":{...}}`. Use `code` only for read workflows. Honor any native confirmation request; do not auto-approve it.

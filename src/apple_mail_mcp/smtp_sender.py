@@ -6,7 +6,7 @@ body in an ``Apple-Mail-URLShareWrapper`` cite-blockquote that renders as a
 quote on iOS (Mail.app bug FB11734014, #245). IMAP ``APPEND`` fixed the
 draft case (#246/#292) but can only create drafts, never send. This module
 submits a clean RFC 822 message (built by
-:func:`apple_mail_fast_mcp.draft_builder.build_draft_mime`) over SMTP, so a
+:func:`apple_mail_mcp.draft_builder.build_draft_mime`) over SMTP, so a
 direct send never touches the AppleScript ``content`` setter.
 
 Credential model: the account's IMAP app-password (see :mod:`keychain`) is
