@@ -1,6 +1,6 @@
 """List, install, or verify the explicitly registered communications clients.
 
-Run with Python 3.12+ on Hochi. Credentials travel over SSH stdin only.
+Run with Python 3.12+ on Hochi. Credentials travel over SSH or SFTP only.
 Examples:
   python3 deploy/communications-fleet.py list
   python3 deploy/communications-fleet.py check --all
@@ -15,6 +15,7 @@ from pathlib import Path
 import shlex
 import subprocess
 import tarfile
+import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = Path.home() / ".config/peacockery-communications"
@@ -38,9 +39,27 @@ def ssh(host, command, data=None, timeout=240):
     return result.stdout.decode(errors="replace")
 
 
-def powershell(host, command, data=None):
+def powershell(host, command):
     encoded = base64.b64encode(command.encode("utf-16le")).decode()
-    return ssh(host, "powershell -NoProfile -EncodedCommand " + encoded, data)
+    return ssh(host, "powershell -NoProfile -EncodedCommand " + encoded)
+
+
+def transfer(host, relative, data):
+    """Use SFTP for Windows data; its SSH console does not reliably deliver stdin."""
+    options = ["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
+    if host.get("port"):
+        options += ["-P", str(host["port"])]
+    if host.get("identity"):
+        options += ["-i", str(Path(host["identity"]).expanduser()), "-o", "IdentitiesOnly=yes"]
+    with tempfile.NamedTemporaryFile() as temporary:
+        temporary.write(data)
+        temporary.flush()
+        result = subprocess.run(
+            [*options, temporary.name, host["ssh"] + ":.config/peacockery-communications/" + relative],
+            capture_output=True, timeout=240,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stderr.decode(errors="replace")[-1800:])
 
 
 def payload():
@@ -92,29 +111,16 @@ def run(name, host, action):
                 host,
                 "$ErrorActionPreference='Stop'; $r=Join-Path $env:USERPROFILE '.config/peacockery-communications'; New-Item -ItemType Directory -Force ($r+'/install') | Out-Null; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; icacls $r /inheritance:r /grant:r ('*'+$sid+':(OI)(CI)F') | Out-Null; if ($LASTEXITCODE) {exit $LASTEXITCODE}",
             )
-            # Transfer archive as base64 stdin to avoid shell or scp path ambiguity.
-            powershell(
-                host,
-                "$ErrorActionPreference='Stop'; $r=Join-Path $env:USERPROFILE '.config/peacockery-communications'; [IO.File]::WriteAllBytes(($r+'/install.tar.gz'),[Convert]::FromBase64String([Console]::In.ReadToEnd())); tar -xzf ($r+'/install.tar.gz') -C ($r+'/install'); exit $LASTEXITCODE",
-                base64.b64encode(payload()),
-            )
-            powershell(
-                host,
-                "$ErrorActionPreference='Stop'; [IO.File]::WriteAllText(($env:USERPROFILE+'/.config/peacockery-communications/service-token'),[Console]::In.ReadToEnd())",
-                (CONFIG / "service-token").read_bytes(),
-            )
+            transfer(host, "install.tar.gz", payload())
+            powershell(host, "$ErrorActionPreference='Stop'; $r=Join-Path $env:USERPROFILE '.config/peacockery-communications'; tar -xzf ($r+'/install.tar.gz') -C ($r+'/install'); exit $LASTEXITCODE")
+            transfer(host, "service-token", (CONFIG / "service-token").read_bytes())
             powershell(
                 host,
                 "& ($env:USERPROFILE+'/.local/bin/uv.exe') run"
                 + python_arg
                 + " --locked --script ($env:USERPROFILE+'/.config/peacockery-communications/install/deploy/install-communications.py'); exit $LASTEXITCODE",
             )
-        # The verifier is safe to refresh during a read-only connection check.
-        powershell(
-            host,
-            "$ErrorActionPreference='Stop'; [IO.File]::WriteAllText(($env:USERPROFILE+'/.config/peacockery-communications/verify.py'),[Console]::In.ReadToEnd())",
-            (ROOT / "deploy/verify-communications.py").read_bytes(),
-        )
+        transfer(host, "verify.py", (ROOT / "deploy/verify-communications.py").read_bytes())
         return powershell(
             host,
             "& ($env:USERPROFILE+'/.local/bin/uv.exe') run"
