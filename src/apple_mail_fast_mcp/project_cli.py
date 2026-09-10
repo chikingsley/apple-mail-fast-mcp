@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
 import tomllib
 from datetime import date
 from pathlib import Path
@@ -51,7 +48,7 @@ def _project_version() -> str:
 
 
 def check_versions() -> int:
-    """Require package and integration manifests to share one version."""
+    """Require package metadata and the Python module to share one version."""
     expected = _project_version()
     init_match = re.search(
         r'^__version__ = "([^"]+)"',
@@ -61,15 +58,6 @@ def check_versions() -> int:
     versions: list[tuple[str, str]] = [
         ("src/apple_mail_fast_mcp/__init__.py", init_match.group(1) if init_match else "")
     ]
-    for relative in (
-        "mcpb/manifest.json",
-        ".claude-plugin/marketplace.json",
-        ".claude-plugin/plugin.json",
-    ):
-        path = ROOT / relative
-        if path.exists():
-            values = re.findall(r'"version"\s*:\s*"([^"]+)"', path.read_text(encoding="utf-8"))
-            versions.extend((relative, value) for value in values)
     mismatches = [(path, value) for path, value in versions if value != expected]
     for path, value in versions:
         print(f"{path}: {value}")
@@ -97,27 +85,6 @@ def check_changelog(tag: str) -> int:
         print(f"Use: ## [{version}] - {date.today().isoformat()}", file=sys.stderr)
         return 1
     print(f"CHANGELOG {version}: {release_date.group(0)}")
-    return 0
-
-
-def build_mcpb() -> int:
-    """Validate and pack the Claude Desktop MCP bundle."""
-    manifest = ROOT / "mcpb/manifest.json"
-    version = str(json.loads(manifest.read_text(encoding="utf-8"))["version"])
-    output = ROOT / f"dist/apple-mail-fast-mcp-{version}.mcpb"
-    with tempfile.TemporaryDirectory(prefix="apple-mail-mcpb-") as temporary:
-        stage = Path(temporary)
-        shutil.copy2(manifest, stage / "manifest.json")
-        for name in ("pyproject.toml", "uv.lock", "README.md", "LICENSE"):
-            shutil.copy2(ROOT / name, stage / name)
-        shutil.copytree(ROOT / "src/apple_mail_fast_mcp", stage / "src/apple_mail_fast_mcp")
-        output.parent.mkdir(exist_ok=True)
-        _run(
-            ["npx", "--yes", "@anthropic-ai/mcpb@latest", "validate", str(stage / "manifest.json")]
-        )
-        _run(["npx", "--yes", "@anthropic-ai/mcpb@latest", "pack", str(stage), str(output)])
-        _run(["npx", "--yes", "@anthropic-ai/mcpb@latest", "info", str(output)], check=False)
-    print(f"Built {output}")
     return 0
 
 
@@ -153,7 +120,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     for command in (
-        "build-mcpb",
         "check-applescript",
         "check-docs",
         "check-parity",
@@ -167,7 +133,6 @@ def main() -> int:
     tag.add_argument("tag")
     args = parser.parse_args()
     commands = {
-        "build-mcpb": build_mcpb,
         "check-applescript": check_applescript_safety,
         "check-docs": check_docs,
         "check-parity": check_parity,

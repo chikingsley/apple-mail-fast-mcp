@@ -17,4 +17,8 @@ uv sync --locked
 just check
 ```
 
-The original checkout may contain an unfinished replacement. Preserve it; develop and deploy from a reviewed release tree. Service credentials, account data, and the Junk ledger stay outside source control.
+This is the sole active Mail repository and has independent Git metadata. The unfinished replacement is preserved outside GitHub in the private source backup described in [repository layout](docs/REPOSITORY_LAYOUT.md). Develop here and deploy from a reviewed release tree. Service credentials, account data, and the Junk ledger stay outside source control.
+
+## Source organization
+
+See [repository layout and provenance](docs/REPOSITORY_LAYOUT.md) for directory responsibilities, dependency pins, licensing and deployment boundaries.

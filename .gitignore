@@ -61,3 +61,6 @@ dmypy.json
 # Documentation builds
 docs/_build/
 site/
+
+# Ruff local cache
+.ruff_cache/
