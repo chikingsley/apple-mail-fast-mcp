@@ -771,6 +771,7 @@ class TestUpdateDraftTool:
             "in_reply_to": "",
             "references": "",
             "attachment_names": [],
+            "mime_content_type": "text/plain; charset=utf-8",
         }
         mock_mail.delete_draft.return_value = True
         mock_mail.create_draft.return_value = {"draft_id": "161000", "sent_message_id": ""}
@@ -922,8 +923,12 @@ class TestDraftToolErrorPaths:
             send_now=True,
             ctx=mock_ctx_accept,
         )
-        assert result["error_type"] == "safety_violation"
-        assert "explicit recipients" in result["error"]
+        # Native replies are now rejected before any send or confirmation gate:
+        # the legacy update cannot preserve their rich quote/signature structure.
+        assert result["error_type"] == "native_update_required"
+        mock_mail.create_draft.assert_not_called()
+        mock_mail.delete_draft.assert_not_called()
+        assert "original remains intact" in result["error"]
         mock_mail.update_draft.assert_not_called()
 
     # ------------------------------------------------------------------

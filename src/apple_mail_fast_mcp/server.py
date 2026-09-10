@@ -21,6 +21,7 @@ from pydantic import BeforeValidator
 
 from .cli import run_setup_imap
 from .code_mode import communications_code_mode
+from .draft_inspection import inspect_saved_message
 from .drafts import DraftStateStore, SeedRecord
 from .exceptions import (
     MailAccountNotFoundError,
@@ -49,6 +50,7 @@ from .imap_connector import ImapConnectionPool
 from .junk_automation.index import JunkLedger
 from .local_db_connector import LocalDbConnector
 from .mail_connector import AppleMailConnector
+from .native_drafts import NativeDraftError
 from .secret_file import SecretFileError, read_secret_file
 from .security import (
     _injection_scan_enabled,
@@ -60,6 +62,7 @@ from .security import (
     validate_send_operation,
 )
 from .templates import Template, TemplateStore
+from .thread_inspection import get_scoped_thread
 from .utils import (
     DEFAULT_MAX_BODY_BYTES,
     attachment_content_encoding,
@@ -1522,7 +1525,58 @@ def update_message(
 
 
 @_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
-def get_thread(message_id: str) -> dict[str, Any]:
+def inspect_draft(
+    message_id: str,
+    account: str,
+    mailbox: str = "Drafts",
+    max_chars: int = 16000,
+    expected_parent_rfc_id: str | None = None,
+    expected_body: str | None = None,
+    expected_signature: str | None = None,
+) -> dict[str, Any]:
+    """Inspect a saved draft or message's actual MIME and threading evidence.
+
+    Requires exact account and mailbox. Returns recipients, subject, RFC reply
+    headers, MIME parts, plain/HTML body, quote and font evidence, truncation,
+    and explicit verification gaps. Supply expected_parent_rfc_id for a true
+    reply check, expected_body for the authored text, and expected_signature
+    from the account's real signature. Missing evidence is never a pass.
+    HTML is evidence, not proof of the on-screen rendered layout.
+    """
+    try:
+        rate_err = check_rate_limit("inspect_draft", {"message_id": message_id})
+        if rate_err:
+            return rate_err
+        return inspect_saved_message(
+            mail,
+            message_id,
+            account=account,
+            mailbox=mailbox,
+            max_chars=max_chars,
+            expected_parent_rfc_id=expected_parent_rfc_id,
+            expected_body=expected_body,
+            expected_signature=expected_signature,
+        )
+    except Exception as error:
+        return {
+            "success": False,
+            "error": str(error),
+            "error_type": "inspection_unavailable",
+            "verification_status": "unverified",
+            "account": account,
+            "mailbox": mailbox,
+            "message_id": message_id,
+        }
+
+
+@_tool({"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
+def get_thread(
+    message_id: str,
+    account: str | None = None,
+    mailbox: str | None = None,
+    search_mailboxes: StrList | None = None,
+    limit: int = 40,
+) -> dict[str, Any]:
     """
     Return all messages in the thread containing the given message.
 
@@ -1542,6 +1596,10 @@ def get_thread(message_id: str) -> dict[str, Any]:
     Args:
         message_id: Internal id of any message in the thread
             (from ``search_messages`` or ``get_messages`` results).
+        account, mailbox: Exact anchor scope. Supplying both uses bounded
+            native discovery and RFC-header linkage, without global scans.
+        search_mailboxes: Exact folders to include, such as Drafts and Sent Items.
+        limit: Bound the candidates inspected. Partial coverage is explicit.
 
     Returns:
         Dictionary with the thread list. Rows are metadata-only —
@@ -1558,6 +1616,22 @@ def get_thread(message_id: str) -> dict[str, Any]:
 
         logger.info("Getting thread for message: %s", message_id)
 
+        if account is not None or mailbox is not None or search_mailboxes is not None:
+            if not account or not mailbox:
+                return {
+                    "success": False,
+                    "error": "account and mailbox are required together",
+                    "error_type": "validation_error",
+                }
+            return get_scoped_thread(
+                mail,
+                message_id,
+                account=account,
+                mailbox=mailbox,
+                search_mailboxes=search_mailboxes,
+                limit=limit,
+            )
+
         thread = mail.get_thread(message_id)
 
         operation_logger.log_operation("get_thread", {"message_id": message_id}, "success")
@@ -1566,6 +1640,10 @@ def get_thread(message_id: str) -> dict[str, Any]:
             "success": True,
             "thread": thread,
             "count": len(thread),
+            "complete": None,
+            "warnings": [
+                "Unscoped legacy lookup does not establish complete thread coverage. Supply account and mailbox for bounded inspection."
+            ],
         }
 
     except MailMessageNotFoundError as e:
@@ -2679,6 +2757,16 @@ def _draft_action_error(op: str, e: Exception) -> dict[str, Any] | None:
     keeps the per-tool exception handling small enough to stay under
     the cyclomatic-complexity threshold.
     """
+    if isinstance(e, NativeDraftError):
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "native_composition_unavailable",
+            "composer_id": e.composer_id,
+            "draft_id": e.draft_id,
+            "verification_status": "unverified",
+            "retry_instruction": "Inspect any returned composer or draft before retrying; do not create duplicates.",
+        }
     if isinstance(e, MailMessageNotFoundError):
         return {"success": False, "error": str(e), "error_type": "message_not_found"}
     if isinstance(e, MailAccountNotFoundError):
@@ -3046,6 +3134,7 @@ async def create_draft(
     template_vars: StrDict | None = None,
     from_account: str | None = None,
     send_now: bool = False,
+    composition_mode: str = "mail_defaults",
     ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Create a draft (fresh, reply, or forward). Optionally send immediately.
@@ -3067,18 +3156,24 @@ async def create_draft(
             is required (recipient of the forward).
         seed_mailbox: Mailbox the reply_to/forward_of message lives in
             (e.g. the ``mailbox`` field from its ``search_messages`` row).
-            Lets the clean save-as-draft path fetch the original directly
-            so reply/forward drafts render without the iOS quote bug —
-            supply it especially for replies to filed (non-INBOX) mail.
-            Defaults to INBOX; a miss falls back transparently.
+            Required in mail_defaults mode: provide the exact source folder,
+            including the complete path for filed messages. Native composition
+            does not search other folders on a miss. Only explicit custom mode
+            retains the legacy INBOX default and fallback behavior.
         to/cc/bcc: Recipient lists. For reply/forward, ``None`` keeps the
             auto-derived recipients; ``[]`` explicitly clears that group;
             a populated list replaces.
         subject: Subject. Required when both seeds are None. For
             reply/forward, ``None`` keeps Mail's ``Re:``/``Fwd:`` prefix.
-        body: Body text. For reply/forward, a non-empty body REPLACES
-            Mail's auto-quoted content; an empty body leaves the
-            auto-quote intact (matches Mail.app's default reply behavior).
+        body: New author text. In default mail_defaults mode this is inserted
+            before the existing native quote and configured signature, preserving
+            Mail's typing font. Do not add a manually reconstructed signature.
+        composition_mode: mail_defaults (default) uses the native Mail editor
+            and requires the signed helper's Accessibility permission. It never
+            silently downgrades. custom explicitly opts into the older IMAP/plain
+            composition path and does not promise Mail's signature or font.
+            Native mode currently saves drafts only; send_now and body_html are
+            unavailable in that mode. Always inspect_draft before claiming success.
         body_html: Optional HTML body. When set, the draft is built as a
             multipart/alternative (HTML + a plain-text alternative taken
             from ``body``, or derived from the HTML when ``body`` is empty).
@@ -3205,6 +3300,7 @@ async def create_draft(
             from_account=from_account,
             send_now=send_now,
             on_warning=warnings.append,
+            composition_mode=composition_mode,
         )
         draft_id = result.get("draft_id", "")
 
@@ -3234,6 +3330,11 @@ async def create_draft(
                 "seed_kind": seed_kind,
                 "send_now": send_now,
                 "from_account": result.get("from_account", ""),
+                "composition_mode": result.get("composition_mode", composition_mode),
+                "composer_id": result.get("composer_id", ""),
+                "parent_message_id": result.get("parent_message_id", ""),
+                "native_evidence": result.get("native_evidence"),
+                "verification_status": result.get("verification_status", "unverified"),
             },
         }
         if warnings:
@@ -3267,11 +3368,11 @@ async def update_draft(
     send_now: bool = False,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
-    """Update an existing draft. Implemented as delete-and-recreate.
+    """Update a supported plain fresh draft, creating its replacement first.
 
     **Returns a NEW draft_id** — Mail.app forbids mutating saved drafts,
     so update is implemented by reading the draft's current state,
-    deleting it, and creating a new draft with the merged fields.
+    creating a new draft with the merged fields, and only then discarding the old one.
     Threading headers (for reply seeds) and forward anchor are preserved
     via persisted seed metadata.
 
@@ -3296,10 +3397,9 @@ async def update_draft(
         body_html: Optional HTML body for the recreated draft (see
             ``create_draft``). Requires IMAP credentials and is limited to
             drafts whose seed is a fresh draft (not reply/forward) and to
-            ``send_now=False``. NOTE: because the draft is recreated and
-            draft state captures only plain text, an existing HTML draft is
-            NOT preserved across an update unless ``body_html`` is passed
-            again. (#251)
+            ``send_now=False``. Existing native, reply, or rich-content
+            drafts are refused before reconstruction; their HTML is never
+            silently dropped. Use a native edit or inspected replacement.
         attachment_paths: Override attachments. None preserves existing
             via temp-dir extraction; [] clears; list replaces.
         template_name / template_vars: Optional template render. User-
@@ -3331,6 +3431,16 @@ async def update_draft(
                 "success": False,
                 "error": ("body_html is only supported for fresh drafts, not reply/forward drafts"),
                 "error_type": "validation_error",
+            }
+
+        # Refuse unsupported reconstruction before attachment or send gates.
+        mime_type = str(state.get("mime_content_type") or "").split(";", 1)[0].strip().lower()
+        if seed_kind != "new" or mime_type != "text/plain":
+            return {
+                "success": False,
+                "error": "This draft contains reply or rich-content structure that legacy reconstruction cannot preserve. The original remains intact; edit its native composer or create and inspect a native replacement.",
+                "error_type": "native_update_required",
+                "draft_id": draft_id,
             }
 
         try:
@@ -3380,14 +3490,6 @@ async def update_draft(
             if gate_err:
                 return gate_err
 
-        # Delete + recreate. Clear stale state first so a connector failure
-        # doesn't leave orphan entries.
-        try:
-            mail.delete_draft(draft_id)
-        except MailDraftNotFoundError:
-            return _draft_error_response(MailDraftNotFoundError(f"no draft with id {draft_id!r}"))
-        store.delete(draft_id)
-
         result = mail.create_draft(
             seed=seed_kind,
             seed_id=seed_id,
@@ -3399,10 +3501,33 @@ async def update_draft(
             body_html=body_html,
             attachment_paths=final_attachments,
             reply_all=reply_all,
-            from_account=from_account,
+            from_account=from_account or state.get("from_account"),
             send_now=send_now,
         )
         new_draft_id = result.get("draft_id", "")
+
+        # Only discard the original after a successful replacement. A failure
+        # leaves the original and its seed metadata available for recovery.
+        if not send_now and not new_draft_id:
+            return {
+                "success": False,
+                "error": "Replacement did not return a saved draft id; original retained",
+                "error_type": "draft_error",
+                "draft_id": draft_id,
+            }
+        try:
+            mail.delete_draft(draft_id)
+        except Exception as cleanup_error:
+            return {
+                "success": True,
+                "draft_id": new_draft_id,
+                "sent_message_id": result.get("sent_message_id", ""),
+                "warnings": [
+                    f"Replacement created, but original {draft_id} was retained: {cleanup_error}"
+                ],
+                "original_draft_id": draft_id,
+            }
+        store.delete(draft_id)
 
         _persist_draft_seed(
             new_draft_id,

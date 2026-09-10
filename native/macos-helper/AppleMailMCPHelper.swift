@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Darwin
 import Foundation
 
@@ -13,6 +14,7 @@ private let usage = """
   Usage: AppleMailMCPHelper --serve <socket-path>
          AppleMailMCPHelper --request-mail-automation [socket-path]
          AppleMailMCPHelper --self-check
+         AppleMailMCPHelper --composition-check
   """
 
 private struct HelperError: Error, CustomStringConvertible {
@@ -39,6 +41,12 @@ private func execute(_ source: String) -> (status: UInt8, message: String) {
       errorInfo[NSAppleScript.errorMessage] as? String
       ?? errorInfo.description
     return (errorStatus, message)
+  }
+  if result.descriptorType == typeAEList || result.descriptorType == typeAERecord {
+    return (
+      errorStatus,
+      "AppleScript returned a structured result without text serialization. Serialize lists and records as JSON before returning them."
+    )
   }
   return (successStatus, result.stringValue ?? "")
 }
@@ -177,13 +185,16 @@ private func makeListener(at socketPath: String) throws -> Int32 {
 
 private func handleClient(_ client: Int32) {
   var noSigPipe: Int32 = 1
-  _ = setsockopt(
+  guard setsockopt(
     client,
     SOL_SOCKET,
     SO_NOSIGPIPE,
     &noSigPipe,
     socklen_t(MemoryLayout.size(ofValue: noSigPipe))
-  )
+  ) == 0 else {
+    writeError(systemError("Could not suppress SIGPIPE on client socket").description)
+    return
+  }
 
   var peerUID: uid_t = 0
   var peerGID: gid_t = 0
@@ -218,7 +229,26 @@ private func handleClient(_ client: Int32) {
   }
 
   let result: (status: UInt8, message: String)
-  if source.hasPrefix("SQL\n") {
+  if source == "ACCESSIBILITY\n" {
+    let data: [String: Any] = [
+      "trusted": AXIsProcessTrusted(),
+      "bundle_id": Bundle.main.bundleIdentifier ?? "",
+      "pid": ProcessInfo.processInfo.processIdentifier,
+      "permission": "System Settings > Privacy & Security > Accessibility",
+    ]
+    do {
+      let encoded = try JSONSerialization.data(withJSONObject: data, options: [.sortedKeys])
+      result = (successStatus, String(decoding: encoded, as: UTF8.self))
+    } catch {
+      result = (errorStatus, String(describing: error))
+    }
+  } else if source.hasPrefix("COMPOSE\n") {
+    do {
+      result = (successStatus, try nativeComposeDraft(String(source.dropFirst(8))))
+    } catch {
+      result = (errorStatus, String(describing: error))
+    }
+  } else if source.hasPrefix("SQL\n") {
     do {
       result = (successStatus, try queryEnvelopeIndex(String(source.dropFirst(4))))
     } catch {
@@ -312,7 +342,21 @@ private func callServer(at socketPath: String, source: String) throws -> String 
 @main
 enum AppleMailMCPHelper {
   static func main() {
+    // A timed-out client can disconnect before its Apple event completes.
+    // Treat a late response as EPIPE instead of terminating the shared helper.
+    // Keep SO_NOSIGPIPE per connection too, and check it before reading work.
+    signal(SIGPIPE, SIG_IGN)
     let arguments = Array(CommandLine.arguments.dropFirst())
+
+    if arguments == ["--composition-check"] {
+      do {
+        print(try nativeComposeDraft(#"{"operation":"preflight"}"#))
+      } catch {
+        writeError(String(describing: error))
+        exit(EX_NOPERM)
+      }
+      return
+    }
 
     if arguments == ["--self-check"] {
       guard let bundleID = Bundle.main.bundleIdentifier else {

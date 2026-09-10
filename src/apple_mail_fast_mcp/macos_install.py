@@ -257,6 +257,7 @@ def install_helper() -> int:
                 "AppKit",
                 str(source / "AppleMailMCPHelper.swift"),
                 str(source / "MailIndex.swift"),
+                str(source / "NativeComposition.swift"),
                 "-lsqlite3",
                 "-o",
                 str(built),

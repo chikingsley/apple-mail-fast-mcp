@@ -1,6 +1,6 @@
 # Shared Mail and Beeper
 
-The maintained services run on Hochi using FastMCP 4.0.3. Mail retains its 25 existing operations and adds `junk_status`; Beeper retains the 12 tools exposed by Beeper Desktop. Each service exposes only `search`, `get_schema`, and `execute` through Code Mode. A sandbox limits each execution to 25 calls, 60 seconds, and 50 MB. Mail's existing mutation confirmation gates remain active.
+The maintained services run on Hochi using FastMCP 4.0.3. Mail exposes 27 operations, including `junk_status` and `inspect_draft`; Beeper retains the 12 tools exposed by Beeper Desktop. Each service exposes only `search`, `get_schema`, and `execute` through Code Mode. A sandbox limits each execution to 25 calls, 60 seconds, and 50 MB. Mail's existing mutation confirmation gates remain active.
 
 ## Routes and credentials
 
@@ -34,6 +34,22 @@ Mail metadata searches query the live read-only Envelope Index through the signe
 The cleaner uses `~/.config/apple-mail-fast-mcp/junk.sqlite` and an adjacent lock. It retains the previously active Junk policy and runs independently of client connections. Mail's own daily Trash setting handles permanent Trash erasure.
 
 ## Verification
+
+### Native draft fidelity
+
+`create_draft` defaults to `composition_mode="mail_defaults"`. The signed helper edits Mail's native composer so the account's signature, typing attributes, and quoted history remain under Mail's control. Enable **Apple Mail MCP Helper** in **System Settings > Privacy & Security > Accessibility** on Hochi. This is separate from Mail Automation and Full Disk Access. The helper checks the permission without prompting or changing mail; it refuses an unavailable native path instead of silently switching to plain-text replacement. Check the installed identity with:
+
+```sh
+"/Users/simonpeacocks/Applications/Apple Mail MCP Helper.app/Contents/MacOS/AppleMailMCPHelper" --composition-check
+```
+
+After saving, use `inspect_draft` with the exact account, mailbox, and message ID. Supply expected parent RFC Message-ID, authored text, and signature text when available. Inspect the reply headers, recipients, HTML quote/signature regions, and font declarations. Native text readback and MIME checks are separate evidence; neither alone proves rendered appearance or the conversation grouping shown by a mail client. Return incomplete checks explicitly. Plain `get_messages` content is not a layout or thread verification.
+
+Use the bounded `get_thread` account/mailbox arguments with explicit source, Sent, and Drafts mailbox paths. The result describes the searched scope, caps, and partial failures. Avoid repeating an unscoped scan after a timeout. After any uncertain draft creation, inspect existing composers and saved drafts before retrying.
+
+The helper source and its installed executable must be rebuilt together. The September 2026 incident exposed an older installed helper that terminated with SIGPIPE when a timed-out client disconnected. The native regression uses an isolated socket to verify that a late reply and a broken pipe leave the helper alive; it never sends mail. Raw AppleScript list/record results now require explicit JSON serialization instead of becoming an empty success response.
+
+### Connection checks
 
 For each installed adapter, establish an MCP connection, list the three exposed tools, discover a schema, and execute a bounded read. Verify Mail and Beeper separately from every reachable host. For Mail, enumerate enabled accounts and exact mailbox paths, then search metadata and read a selected result. Check authentication rejection with no token. A saved configuration alone is not a successful connection.
 

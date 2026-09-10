@@ -2,7 +2,7 @@
 
 Private communications services hosted on Hochi. All configured agents reach the same Mail.app and Beeper Desktop accounts through authenticated local or Tailscale connections.
 
-FastMCP 4.0.3 Code Mode exposes three tools per service while retaining the full underlying catalog: 26 Mail operations and Beeper Desktop's 12 operations. Mail includes search, bodies, attachments, threads, statistics, drafts and sending, mailbox and rule changes, templates, and Junk status.
+FastMCP 4.0.3 Code Mode exposes three tools per service while retaining the full underlying catalog: 27 Mail operations and Beeper Desktop's 12 operations. Mail includes search, bodies, attachments, threads, statistics, native drafts and saved MIME inspection, sending, mailbox and rule changes, templates, and Junk status.
 
 Mail metadata uses a read-only database query through the signed Full Disk Access helper. Message bodies and mutations use the existing Mail/IMAP connectors. The standalone Junk cleaner remains independent of agent sessions. Beeper uses its own MCP with one shared upstream credential stored only on Hochi.
 

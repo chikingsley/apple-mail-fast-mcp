@@ -4,6 +4,7 @@ AppleScript-based connector for Apple Mail.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import re
@@ -67,6 +68,7 @@ from .local_db_connector import (
     LocalDbUnavailableError,
     LocalDbUnsupportedQueryError,
 )
+from .native_drafts import NativeDraftError, create_native_draft
 from .security import send_recipients_test_violation
 from .smtp_sender import SmtpSender
 from .utils import (
@@ -4842,11 +4844,13 @@ class AppleMailConnector:
 
                 set inReplyTo to ""
                 set refs to ""
+                set mimeContentType to ""
                 try
                     repeat with h in headers of foundDraft
                         set hname to (name of h)
                         if hname is "In-Reply-To" then set inReplyTo to (content of h)
                         if hname is "References" then set refs to (content of h)
+                        if hname is "Content-Type" then set mimeContentType to (content of h)
                     end repeat
                 end try
 
@@ -4868,7 +4872,7 @@ class AppleMailConnector:
                     set draftBody to (content of foundDraft)
                 end try
 
-                set resultData to {{|found|:true, |draft_id|:targetId, |to|:toList, |cc|:ccList, |bcc|:bccList, |subject|:draftSubject, |body|:draftBody, |in_reply_to|:inReplyTo, |references|:refs, |attachment_names|:attNames}}
+                set resultData to {{|found|:true, |draft_id|:targetId, |to|:toList, |cc|:ccList, |bcc|:bccList, |subject|:draftSubject, |body|:draftBody, |in_reply_to|:inReplyTo, |references|:refs, |attachment_names|:attNames, |mime_content_type|:mimeContentType, |from_account|:(id of account of mailbox of foundDraft), |mailbox|:(name of mailbox of foundDraft)}}
             end if
         end tell
         """
@@ -5731,6 +5735,64 @@ class AppleMailConnector:
             self._log_imap_fallback(from_account, exc)
         return None
 
+    def _create_draft_with_mail_defaults(
+        self,
+        *,
+        seed: str,
+        seed_id: str | None,
+        seed_mailbox: str | None,
+        to: list[str] | None,
+        cc: list[str] | None,
+        bcc: list[str] | None,
+        subject: str | None,
+        body: str,
+        body_html: str | None,
+        attachment_paths: list[Path] | None,
+        reply_all: bool,
+        from_account: str | None,
+        send_now: bool,
+    ) -> dict[str, Any]:
+        if send_now or body_html is not None:
+            raise NativeDraftError(
+                "Mail-default composition currently saves native drafts only. "
+                "Inspect the saved draft before sending; custom HTML requires an explicit custom composition mode."
+            )
+        native_account = self._effective_from_account(from_account, send_now=False)
+        if native_account is None:
+            raise NativeDraftError(
+                "from_account is required to select the correct Mail signature and font."
+            )
+        bounded = copy.copy(self)
+        bounded.timeout = 15
+        return create_native_draft(
+            bounded._run_applescript,  # ruff: ignore[private-member-access] - bounded clone uses the same connector boundary
+            account=native_account,
+            sender=self._resolve_account_to_sender(native_account),
+            seed=seed,
+            seed_id=seed_id,
+            seed_mailbox=seed_mailbox,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=subject,
+            body=body,
+            reply_all=reply_all,
+            attachment_block=self._build_attachment_block(attachment_paths),
+            mailbox_handlers=_MAILBOX_RESOLVER_HANDLERS,
+        )
+
+    @staticmethod
+    def _draft_recipient_block(kind: str, addrs: list[str] | None) -> str:
+        if addrs is None:
+            return ""
+        values = ", ".join(f'"{escape_applescript_string(sanitize_input(a))}"' for a in addrs)
+        return f"""
+            delete (every {kind} recipient of theMessage)
+            repeat with addr in {{{values}}}
+                make new {kind} recipient at end of {kind} recipients of theMessage with properties {{address:addr}}
+            end repeat
+        """
+
     def create_draft(
         self,
         *,
@@ -5748,7 +5810,8 @@ class AppleMailConnector:
         from_account: str | None = None,
         send_now: bool = False,
         on_warning: Callable[[str], None] | None = None,
-    ) -> dict[str, str]:
+        composition_mode: str = "custom",
+    ) -> dict[str, Any]:
         """Create a draft (fresh, reply, or forward). Optionally send.
 
         For ``seed="new"`` save-as-draft (``send_now=False``) with a known
@@ -5833,6 +5896,25 @@ class AppleMailConnector:
         """
         self._validate_create_draft_args(seed, seed_id, to, subject)
 
+        if composition_mode not in {"mail_defaults", "custom"}:
+            raise ValueError("composition_mode must be mail_defaults or custom")
+        if composition_mode == "mail_defaults":
+            return self._create_draft_with_mail_defaults(
+                seed=seed,
+                seed_id=seed_id,
+                seed_mailbox=seed_mailbox,
+                to=to,
+                cc=cc,
+                bcc=bcc,
+                subject=subject,
+                body=body,
+                body_html=body_html,
+                reply_all=reply_all,
+                attachment_paths=attachment_paths,
+                from_account=from_account,
+                send_now=send_now,
+            )
+
         # #321: with no explicit account the clean IMAP draft path can't
         # engage (it must name the account for creds + From); adopt the
         # sole enabled account when there is one (it's Mail's default
@@ -5907,20 +5989,9 @@ class AppleMailConnector:
 
         # Recipient blocks: AppleScript fragments that, when included,
         # clear and re-populate that recipient group on `theMessage`.
-        def _recipient_block(kind: str, addrs: list[str] | None) -> str:
-            if addrs is None:
-                return ""  # keep auto-derived
-            list_str = ", ".join(f'"{escape_applescript_string(sanitize_input(a))}"' for a in addrs)
-            return f"""
-                delete (every {kind} recipient of theMessage)
-                repeat with addr in {{{list_str}}}
-                    make new {kind} recipient at end of {kind} recipients of theMessage with properties {{address:addr}}
-                end repeat
-            """
-
-        to_block = _recipient_block("to", to)
-        cc_block = _recipient_block("cc", cc)
-        bcc_block = _recipient_block("bcc", bcc)
+        to_block = self._draft_recipient_block("to", to)
+        cc_block = self._draft_recipient_block("cc", cc)
+        bcc_block = self._draft_recipient_block("bcc", bcc)
 
         attachment_block = self._build_attachment_block(attachment_paths)
 

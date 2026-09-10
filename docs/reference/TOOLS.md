@@ -230,6 +230,8 @@ On AppleScript reads, `attachments_complete: false` and `attachment_errors` iden
 
 Return all messages in the thread containing the given anchor message, sorted by `date_received` ascending. Result rows are metadata-only — pipe ids into `get_messages([ids])` for full bodies, or into `search_messages(source=[ids], ...)` for filtered metadata.
 
+For bounded reads, supply `account`, the anchor `mailbox`, and optional `search_mailboxes` plus `limit`. The scoped path matches RFC reply/reference headers within the requested mailboxes, reports caps, errors, and completeness, and does not scan unrelated accounts. An incomplete bounded result is not proof that no earlier messages exist. Omitting scope retains the older connector behavior described below, which can be slow on large AppleScript-backed accounts.
+
 **Parameters:**
 
 | Parameter    | Type   | Required | Default | Description                                                                                  |
@@ -933,6 +935,10 @@ The drafts lifecycle replaces the v0.6 send group (`send_email`, `send_email_wit
 
 Create a draft (fresh, reply, or forward). Optionally send immediately.
 
+**Native composition is the default.** `composition_mode="mail_defaults"` uses Mail's actual composer, inserts authored text above existing content, and preserves the account's signature, typing attributes, and quote. It requires the signed helper's Accessibility permission on Hochi. `seed_mailbox` identifies the exact source mailbox and `from_account` identifies the account. Preserve the native reply subject and recipients unless deliberately changing them. `body_html` is for explicitly custom composition, not native defaults. Unsupported native operations fail explicitly rather than flattening the draft. A native save reports its composer and preservation evidence; use `inspect_draft` before claiming the saved message's thread, signature, or font is correct.
+
+**Explicit custom mode.** `composition_mode="custom"` selects the legacy IMAP/AppleScript composition described in the parameter details and transport notes below. In this mode a nonempty body may replace the native quote, and the account's rich signature and font are not automatically preserved. Do not switch to custom mode merely to bypass unavailable native composition.
+
 **⚠️ Security Note:** When `send_now=True`, requires user confirmation.
 
 **Parameters:**
@@ -976,34 +982,35 @@ A draft created via the clean IMAP path triggers an account sync so it appears i
 **Examples:**
 
 ```python
-# Save a fresh draft for later
+# Native reply: preserve Mail's subject, recipients, signature and quote.
+draft = create_draft(
+    reply_to="160989",
+    seed_mailbox="Archive/Vendors/Piping",
+    from_account="Work",
+    body="Thank you. Please confirm the available sizes."
+)
+
+# Check the saved reply; use actual expected values from the correspondence.
+inspect_draft(
+    message_id=draft["draft_id"],
+    account="Work",
+    mailbox="Drafts",
+    expected_parent_rfc_id="original-message@example.com",
+    expected_body="Thank you. Please confirm the available sizes."
+)
+
+# Explicit custom formatting for a fresh draft; requires configured IMAP.
 create_draft(
+    composition_mode="custom",
+    from_account="Work",
     to=["alice@example.com"],
     subject="Project Update",
-    body="Here's the latest..."
-)
-
-# Reply, save as draft (preserves Mail's auto-quote)
-create_draft(reply_to="160989")
-
-# Reply with custom body, then send
-create_draft(reply_to="160989", body="Sounds good, thanks!", send_now=True)
-
-# Forward with attachment
-create_draft(
-    forward_of="160989",
-    to=["recipient@example.com"],
-    body="FYI",
-    attachment_paths=["/tmp/report.pdf"]
-)
-
-# Template-driven send
-create_draft(
-    reply_to="160989",
-    template_name="thanks-for-meeting",
-    send_now=True
+    body="Here is the latest update.",
+    body_html="<p>Here is the latest update.</p>"
 )
 ```
+
+Native mode currently saves drafts only; native immediate sending and in-place rich draft editing remain unavailable. An unsupported operation returns an explicit error rather than changing composition mode automatically.
 
 **Error Codes:**
 
@@ -1017,11 +1024,27 @@ create_draft(
 
 ______________________________________________________________________
 
+### inspect_draft
+
+Read the saved MIME of a draft or sent message from an exact account and mailbox. This is read-only and never sends or rewrites mail.
+
+| Parameter | Required | Meaning |
+| --- | --- | --- |
+| `message_id` | Yes | Saved Mail message ID from the creation or search result. |
+| `account` | Yes | Exact Mail account name or UUID. |
+| `mailbox` | No | Exact path; defaults to `Drafts`. Use `Sent Items` or the actual account path to compare a prior sent message. |
+| `max_chars` | No | Returned text/HTML budget, default 16000; each truncation is reported. |
+| `expected_parent_rfc_id` | No | Expected original RFC Message-ID to compare against saved `In-Reply-To`. |
+| `expected_body` | No | Reply text expected outside quoted and signature HTML regions. |
+| `expected_signature` | No | Signature text expected in a nonquoted AppleMailSignature or Outlook Signature region. |
+
+The result exposes From/To/Cc/Bcc, subject and threading headers, MIME parts, bounded plain text and HTML, authored/quoted/signature regions, inline font declarations, and explicit checks. A `Re:` subject alone cannot pass the reply-linkage check. Finding reply text or a signature only inside quoted history cannot pass the corresponding authored/signature check. Plain text alone cannot prove HTML layout. Missing source, parse/size limits, and unrequested checks are reported as incomplete or unavailable; the result never claims that Mail's rendered UI or conversation grouping was inspected.
+
 ### update_draft
 
-Update an existing draft. Implemented as **delete-and-recreate** — Mail.app forbids mutating saved drafts, so this tool reads the current state, deletes the draft, and creates a new one with the merged fields. Threading headers (for replies) and forward anchors are preserved via persisted seed metadata.
+Update a supported plain fresh draft by creating its replacement before discarding the original. Reply, native, and rich-content drafts are protected from the older lossy reconstruction path: unsupported updates return `native_update_required` and preserve the original. Use the native composer or create and inspect a native replacement for those drafts. This guard prevents a failed update from erasing the original or silently flattening its quote/signature/HTML.
 
-**⚠️ Returns a NEW `draft_id`** — the input id is no longer valid after this call. Callers caching the id must re-read the response.
+**Returns a NEW `draft_id` on a successful replacement.** Callers must inspect the result and retain any cleanup warning; a failure before replacement leaves the original intact. This operation does not yet provide in-place editing of a native rich reply.
 
 **Parameters:**
 
@@ -1031,7 +1054,7 @@ Update an existing draft. Implemented as **delete-and-recreate** — Mail.app fo
 | `to` / `cc` / `bcc`               | array[string]   | No       | None    | Override recipient groups: `None` keeps existing, `[]` clears, populated list replaces.                                                                                                                                                                                                                                                       |
 | `subject`                         | string          | No       | None    | Override subject. `None` keeps existing.                                                                                                                                                                                                                                                                                                      |
 | `body`                            | string          | No       | None    | Override body. `None` keeps existing; non-None replaces (including `""`).                                                                                                                                                                                                                                                                     |
-| `body_html`                       | string          | No       | None    | Optional HTML body for the recreated draft (#251); see `create_draft`. Requires IMAP credentials; limited to fresh-seed drafts (not reply/forward) and `send_now=False`. **Not auto-preserved:** because update is delete-and-recreate and draft state captures only plain text, existing HTML is dropped unless `body_html` is passed again. |
+| `body_html` | string | No | None | Explicit custom HTML for supported fresh drafts only. Existing rich/native/reply drafts are protected from lossy reconstruction and return `native_update_required`; their HTML is not silently dropped. |
 | `attachment_paths`                | array[string]   | No       | None    | Override attachments: `None` **preserves existing** (extracted to a temp dir and re-attached); `[]` clears; populated list replaces.                                                                                                                                                                                                          |
 | `template_name` / `template_vars` | string / object | No       | None    | Optional template render. User-supplied `subject`/`body` override the rendered output.                                                                                                                                                                                                                                                        |
 | `from_account`                    | string          | No       | None    | Override sender.                                                                                                                                                                                                                                                                                                                              |
@@ -1048,7 +1071,7 @@ Update an existing draft. Implemented as **delete-and-recreate** — Mail.app fo
 }
 ```
 
-**Externally-created drafts:** for drafts not created via `create_draft`, seed recovery falls back to scanning Mail.app for the draft's `In-Reply-To` header — this can take 30s+ on large mailboxes. Forward seeds without persisted state are misclassified as fresh.
+**Externally-created drafts:** inspect their saved MIME before updating. Missing persisted metadata is not evidence that a draft is a plain new message. Structure that cannot be preserved requires a native edit, not inferred reconstruction.
 
 **Examples:**
 
