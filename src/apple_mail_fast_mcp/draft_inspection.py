@@ -88,12 +88,13 @@ class _StructureParser(HTMLParser):
         self.quote_count = 0
         self.signature_count = 0
         self.style_blocks: list[str] = []
+        self.outlook_quote_tail = False
 
     def _region(self) -> str:
         regions = [region for _, region in self.stack]
         if "ignored" in regions:
             return "ignored"
-        if "quoted" in regions:
+        if "quoted" in regions or self.outlook_quote_tail:
             return "quoted"
         if "signature" in regions:
             return "signature"
@@ -103,6 +104,11 @@ class _StructureParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {key.lower(): value or "" for key, value in attrs}
         identifier = (values.get("id", "") + " " + values.get("class", "")).lower()
+        # Outlook's reply header and old body are siblings, not a blockquote.
+        # The exact reply boundary marks the remainder of that message as history.
+        if values.get("id", "").lower() == "divrplyfwdmsg":
+            self.outlook_quote_tail = True
+            self.quote_count += 1
         region = self._region()
         if tag in {"script", "style", "head"}:
             region = "ignored"

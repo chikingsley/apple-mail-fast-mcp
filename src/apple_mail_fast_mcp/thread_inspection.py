@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from datetime import UTC
+from datetime import UTC, datetime
 from email import policy
 from email.parser import HeaderParser
 from email.utils import parsedate_to_datetime
@@ -24,8 +24,16 @@ if TYPE_CHECKING:
     from .mail_connector import AppleMailConnector
 
 
+_DATE_HANDLER = """
+on mailDateTimestamp(mailDate)
+    set foundationDate to current application's NSDate's dateWithTimeInterval:0 sinceDate:mailDate
+    return foundationDate's timeIntervalSince1970() as real
+end mailDateTimestamp
+"""
+
+
 def _row_script(message_variable: str, mailbox_variable: str) -> str:
-    return f"""{{|id|:(id of {message_variable} as text), |rfc_message_id|:(message id of {message_variable}), |subject|:(subject of {message_variable}), |sender|:(sender of {message_variable}), |date_received|:(date received of {message_variable} as text), |read_status|:(read status of {message_variable}), |flagged|:(flagged status of {message_variable}), |mailbox|:{mailbox_variable}, |headers_raw|:(all headers of {message_variable})}}"""
+    return f"""{{|id|:(id of {message_variable} as text), |rfc_message_id|:(message id of {message_variable}), |subject|:(subject of {message_variable}), |sender|:(sender of {message_variable}), |date_received|:(date received of {message_variable} as text), |date_received_timestamp|:(my mailDateTimestamp(date received of {message_variable})), |read_status|:(read status of {message_variable}), |flagged|:(flagged status of {message_variable}), |mailbox|:{mailbox_variable}, |headers_raw|:(all headers of {message_variable})}}"""
 
 
 def _enrich_row(row: dict[str, Any], account: str) -> dict[str, Any]:
@@ -47,7 +55,12 @@ def _enrich_row(row: dict[str, Any], account: str) -> dict[str, Any]:
         "<>"
     )
     try:
-        received = parsedate_to_datetime(row["date_header"])
+        timestamp = row.get("date_received_timestamp")
+        received = (
+            datetime.fromtimestamp(float(timestamp), UTC)
+            if timestamp is not None
+            else parsedate_to_datetime(row["date_header"])
+        )
         row["date_sort"] = received.astimezone(UTC).isoformat() if received.tzinfo else ""
     except ValueError, TypeError, OverflowError:
         row["date_sort"] = ""
@@ -96,7 +109,7 @@ def get_scoped_thread(
         end tell
         ''',
         timeout=8,
-        handlers=_MAILBOX_RESOLVER_HANDLERS,
+        handlers=_MAILBOX_RESOLVER_HANDLERS + _DATE_HANDLER,
     )
     raw = parse_applescript_json(bounded._run_applescript(anchor_script))  # ruff: ignore[private-member-access] - mandated connector boundary
     if not isinstance(raw, dict):
@@ -168,7 +181,7 @@ def get_scoped_thread(
         end tell
         ''',
         timeout=4,
-        handlers=_MAILBOX_RESOLVER_HANDLERS,
+        handlers=_MAILBOX_RESOLVER_HANDLERS + _DATE_HANDLER,
     )
     bounded.timeout = 26
     try:
@@ -200,7 +213,8 @@ def get_scoped_thread(
         known_ids, [row for row in candidates if row["id"] != anchor["id"]]
     )
     thread = [anchor, *accepted]
-    thread.sort(key=lambda row: str(row.get("date_sort", "")))
+    chronology_complete = all(row.get("date_sort") for row in thread)
+    thread.sort(key=lambda row: (not row.get("date_sort"), str(row.get("date_sort", ""))))
     for row in thread:
         row.pop("date_sort", None)
         row.pop("references_parsed", None)
@@ -218,6 +232,7 @@ def get_scoped_thread(
         "scope": scope,
         "complete": False,
         "scope_complete": scope_complete,
+        "chronology_complete": chronology_complete,
         "candidate_count": len(candidates),
         "finished_mailboxes": candidate_data.get("finished_mailboxes", []),
         "candidate_limit_reached": bool(candidate_data.get("hit_limit")),

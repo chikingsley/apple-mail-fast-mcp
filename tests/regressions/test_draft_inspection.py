@@ -103,6 +103,30 @@ def test_regression_quoted_outlook_signature_does_not_verify_current_signature()
     assert "Chi Example" in result["structure"]["quoted_text"]["text"]
 
 
+def test_regression_outlook_sibling_history_is_not_authored_text():
+    """Regression: live Outlook draft 242679's old reply was misclassified as new text."""
+    html = (
+        '<div style="font-family: Aptos; font-size: 11pt">Following up.</div>'
+        '<div id="Signature">Current signature</div>'
+        '<hr><div id="divRplyFwdMsg"><b>From:</b> Buyer</div>'
+        '<div style="font-size: 19pt">Already sent text.</div>'
+        '<div id="Signature">Earlier signature</div>'
+    )
+    result = inspect_message_source(
+        _message(html), expected_body="Already sent text.", expected_signature="Earlier signature"
+    )
+    structure = result["structure"]
+    assert structure["authored_text"]["text"].strip() == "Following up."
+    assert structure["signature_text"]["text"].strip() == "Current signature"
+    assert structure["signature_regions"] == 1
+    assert "Already sent text." in structure["quoted_text"]["text"]
+    assert result["verification"]["checks"]["authored_body"]["status"] == "failed"
+    assert result["verification"]["checks"]["signature"]["status"] == "failed"
+    assert all(
+        font["region"] == "quoted" for font in structure["inline_fonts"] if font["value"] == "19pt"
+    )
+
+
 @pytest.mark.parametrize(
     "identifier", ["SignatureLogo", "SomeAppleMailSignature", "signature-footer"]
 )
@@ -355,6 +379,26 @@ def test_regression_thread_chronology_compares_rfc_dates_in_one_timezone():
     ):
         result = get_scoped_thread(connector, "42", account="CICA", mailbox="Drafts")
     assert [row["id"] for row in result["thread"]] == ["41", "42"]
+
+
+def test_regression_native_localized_headers_sort_by_mail_date_timestamp():
+    """Regression: live all-headers Date strings were localized, not RFC 5322 dates."""
+    anchor = _thread_row("42", "draft@example.test", "parent@example.test")
+    parent = _thread_row("41", "parent@example.test")
+    for row, timestamp in [(anchor, 1789070636), (parent, 1789070000)]:
+        row["headers_raw"] = row["headers_raw"].replace(
+            "Thu, 10 Sep 2026 12:00:00 -0700", "September 10, 2026 at 1:03:56 PM MST"
+        )
+        row["date_received_timestamp"] = timestamp
+    response = {"candidates": [parent], "errors": [], "finished_mailboxes": ["Drafts"]}
+    connector = AppleMailConnector()
+    with patch.object(
+        connector, "_run_applescript", side_effect=[json.dumps(anchor), json.dumps(response)]
+    ) as run:
+        result = get_scoped_thread(connector, "42", account="CICA", mailbox="Drafts")
+    assert [row["id"] for row in result["thread"]] == ["41", "42"]
+    assert result["chronology_complete"] is True
+    assert all("my mailDateTimestamp(date received" in call.args[0] for call in run.call_args_list)
 
 
 @pytest.mark.asyncio

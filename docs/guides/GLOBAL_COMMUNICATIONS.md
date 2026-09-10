@@ -37,11 +37,13 @@ The cleaner uses `~/.config/apple-mail-fast-mcp/junk.sqlite` and an adjacent loc
 
 ### Native draft fidelity
 
-`create_draft` defaults to `composition_mode="mail_defaults"`. The signed helper edits Mail's native composer so the account's signature, typing attributes, and quoted history remain under Mail's control. Enable **Apple Mail MCP Helper** in **System Settings > Privacy & Security > Accessibility** on Hochi. This is separate from Mail Automation and Full Disk Access. The helper checks the permission without prompting or changing mail; it refuses an unavailable native path instead of silently switching to plain-text replacement. Check the installed identity with:
+`create_draft` defaults to `composition_mode="mail_defaults"`. The signed helper edits Mail's native composer so the account's signature, typing attributes, and quoted history remain under Mail's control. This requires **Apple Mail MCP Helper** Accessibility access, separate from Mail Automation and Full Disk Access. Native Mail defaults may differ from the user's Outlook setup; inspect a same-account baseline and the actual configured signature/font before claiming fidelity. The helper refuses an unavailable native path instead of silently switching to plain-text replacement. Query the actual resident process with:
 
 ```sh
-"/Users/simonpeacocks/Applications/Apple Mail MCP Helper.app/Contents/MacOS/AppleMailMCPHelper" --composition-check
+"/Users/simonpeacocks/Applications/Apple Mail MCP Helper.app/Contents/MacOS/AppleMailMCPHelper" --accessibility-check
 ```
+
+This diagnostic relays to the owner-only resident socket and returns its PID, bundle path, and trust state. It does not inspect the System Settings switch. If the user sees the switch enabled but the process reports false, inspect the displayed identity, launchd process, code-signing requirement, and relevant macOS TCC logs; do not repeatedly assert the user has not enabled access. Do not edit protected permission databases or bypass the OS grant. `--composition-check` also relays to the resident helper and performs a native preflight without creating a draft.
 
 After saving, use `inspect_draft` with the exact account, mailbox, and message ID. Supply expected parent RFC Message-ID, authored text, and signature text when available. Inspect the reply headers, recipients, HTML quote/signature regions, and font declarations. Native text readback and MIME checks are separate evidence; neither alone proves rendered appearance or the conversation grouping shown by a mail client. Return incomplete checks explicitly. Plain `get_messages` content is not a layout or thread verification.
 

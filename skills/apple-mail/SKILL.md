@@ -22,6 +22,8 @@ When the user refers to an email exchange, retrieve the relevant received and se
 
 Create replies from the actual message seed and exact source mailbox. Preserve the native subject and recipient derivation unless the user requests a change. Insert the new reply above the quoted history using the account's configured signature and composition font; do not replace the signature with a typed name or assume plain-text body replacement preserves rich formatting.
 
+When matching the user's usual setup, compare the same account's existing sent mail or user draft with the composing application's settings. Outlook and Hochi Mail defaults may differ, and a Mail account may have no matching signature. Do not claim native defaults match the user's setup without evidence, or change global settings to resolve a mismatch without authorization.
+
 Discover the current draft inspection capability and inspect the saved result for recipients, reply headers or conversation linkage, new text, quoted history, signature, and formatting. A plain-text readback verifies text only. Distinguish a tool's reported reply seed from evidence of the saved message's actual reply linkage, and distinguish MIME/style inspection from visual rendering. Report unsupported or incomplete checks explicitly. A fallback warning that threatens the requested structure is an unresolved result, not verified success.
 
 Before updating a saved draft, check whether the operation preserves its HTML, attachments, reply seed, and account settings. Preserve the original until a replacement is saved and verified. Never retry an uncertain draft creation without first checking whether it already created a draft.
@@ -31,3 +33,5 @@ Before updating a saved draft, check whether the operation preserves its HTML, a
 Installed clients use the global `peacockery-mcp apple-mail` stdio adapter. It reads an owner-only credential file, so desktop apps need no shell environment token. Local requests use loopback; remote requests use authenticated Tailscale HTTPS at `https://hochi.tailbce39f.ts.net/apple-mail/mcp`.
 
 If the connector is missing or fails, report the exact failed step. Check the adapter, service, and helper separately. Do not create an independent Mail server or invent provider credentials. The maintained installer and diagnostic commands are documented in `docs/guides/GLOBAL_COMMUNICATIONS.md` in the deployed Apple Mail repository. Existing agent sessions may need their MCP connections reloaded after configuration changes.
+
+An Accessibility check describes the running helper's trust state, not the switch displayed in System Settings. If the user reports it is enabled, investigate the actual resident process, bundle path, signing identity, and OS denial before requesting another toggle. Inspect the visible entry on Hochi when available; do not treat a separately launched diagnostic process as the production helper.

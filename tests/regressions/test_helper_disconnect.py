@@ -64,6 +64,20 @@ def test_regression_helper_survives_disconnected_reader():
                 capabilities = json.loads(connector._run_applescript("ACCESSIBILITY\n"))
                 assert isinstance(capabilities["trusted"], bool)
                 assert capabilities["pid"] == process.pid
+                # Regression: a CLI check launched over SSH examined itself, not
+                # the resident process that actually handles native composition.
+                checked = subprocess.run(
+                    [str(binary), "--accessibility-check", str(socket_path)],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=5,
+                )
+                assert json.loads(checked.stdout)["pid"] == process.pid
+                assert (
+                    capabilities["evidence_scope"]
+                    == "resident_helper_process_not_system_settings_ui"
+                )
                 with pytest.raises(MailAppleScriptError, match="structured result"):
                     connector._run_applescript("return {1, 2}")
             finally:

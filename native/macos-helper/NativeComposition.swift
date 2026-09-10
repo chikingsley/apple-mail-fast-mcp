@@ -33,7 +33,7 @@ private func axWritable(_ element: AXUIElement, _ name: String) -> Bool {
 private func mailAXApplication() throws -> AXUIElement {
   guard AXIsProcessTrusted() else {
     throw composeError(
-      "NATIVE_COMPOSITION_ACCESS_REQUIRED: Enable Apple Mail MCP Helper in System Settings > Privacy & Security > Accessibility. No draft was changed."
+      "NATIVE_COMPOSITION_ACCESS_REQUIRED: macOS does not recognize the running Apple Mail MCP Helper as a trusted Accessibility client. If System Settings shows it enabled, investigate the resident process and permission identity mismatch; this check does not establish that the user disabled access. No draft was changed."
     )
   }
   guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.mail").first else {

@@ -14,7 +14,8 @@ private let usage = """
   Usage: AppleMailMCPHelper --serve <socket-path>
          AppleMailMCPHelper --request-mail-automation [socket-path]
          AppleMailMCPHelper --self-check
-         AppleMailMCPHelper --composition-check
+         AppleMailMCPHelper --composition-check [socket-path]
+         AppleMailMCPHelper --accessibility-check [socket-path]
   """
 
 private struct HelperError: Error, CustomStringConvertible {
@@ -233,7 +234,10 @@ private func handleClient(_ client: Int32) {
     let data: [String: Any] = [
       "trusted": AXIsProcessTrusted(),
       "bundle_id": Bundle.main.bundleIdentifier ?? "",
+      "bundle_path": Bundle.main.bundleURL.path,
+      "executable_path": Bundle.main.executableURL?.path ?? "",
       "pid": ProcessInfo.processInfo.processIdentifier,
+      "evidence_scope": "resident_helper_process_not_system_settings_ui",
       "permission": "System Settings > Privacy & Security > Accessibility",
     ]
     do {
@@ -348,9 +352,12 @@ enum AppleMailMCPHelper {
     signal(SIGPIPE, SIG_IGN)
     let arguments = Array(CommandLine.arguments.dropFirst())
 
-    if arguments == ["--composition-check"] {
+    if ["--composition-check", "--accessibility-check"].contains(arguments.first ?? ""), arguments.count <= 2 {
+      let socketPath = arguments.count == 2 ? arguments[1] : defaultSocketPath
+      let source = arguments.first == "--accessibility-check"
+        ? "ACCESSIBILITY\n" : "COMPOSE\n" + #"{"operation":"preflight"}"#
       do {
-        print(try nativeComposeDraft(#"{"operation":"preflight"}"#))
+        print(try callServer(at: socketPath, source: source))
       } catch {
         writeError(String(describing: error))
         exit(EX_NOPERM)
