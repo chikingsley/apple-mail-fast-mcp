@@ -16,6 +16,19 @@ from apple_mail_fast_mcp.mail_connector import AppleMailConnector
 from apple_mail_fast_mcp.thread_inspection import get_scoped_thread
 
 
+def test_regression_public_inspection_uses_registered_read_rate_tier():
+    """Regression: live inspect_draft raised KeyError before reading any MIME.
+
+    Exercise the real public rate gate while replacing only the native I/O.
+    """
+    from apple_mail_fast_mcp import server
+
+    with patch.object(server, "inspect_saved_message", return_value={"success": True}) as read:
+        result = server.inspect_draft("42", account="Work", mailbox="Drafts")
+    assert result["success"] is True
+    read.assert_called_once()
+
+
 def _message(html: str, *, parent: bool = True) -> str:
     message = EmailMessage()
     message["From"] = "Chi <chi@example.test>"
