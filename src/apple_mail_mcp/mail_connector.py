@@ -14,7 +14,6 @@ import struct
 import subprocess
 import tempfile
 import time
-import warnings
 from datetime import date as _date
 from datetime import datetime as _datetime
 from datetime import timedelta as _timedelta
@@ -2025,6 +2024,20 @@ class AppleMailConnector:
         rfc_message_id: str,
     ) -> int:
         """Permanently delete one exact Junk message through scoped IMAP UID EXPUNGE."""
+        return self._permanently_delete_imap_messages(
+            account=account,
+            mailbox=mailbox,
+            rfc_message_ids=[rfc_message_id],
+        )
+
+    def _permanently_delete_imap_messages(
+        self,
+        *,
+        account: str,
+        mailbox: str,
+        rfc_message_ids: list[str],
+    ) -> int:
+        """Permanently delete exact messages through scoped IMAP UID EXPUNGE."""
         host, port, email = self._resolve_imap_config(account)
         password = self._get_imap_password_with_fallback(account, email)
         return ImapConnector(
@@ -2033,7 +2046,7 @@ class AppleMailConnector:
             email,
             password,
             pool=self._imap_pool,
-        ).permanently_delete_messages([rfc_message_id], mailbox)
+        ).permanently_delete_messages(rfc_message_ids, mailbox)
 
     def search_messages(
         self,
@@ -4442,15 +4455,15 @@ class AppleMailConnector:
         source_mailbox: str | None = None,
     ) -> int:
         """
-        Delete messages (always moves to the account's Trash mailbox).
+        Delete messages, either by moving them to Trash or permanently.
 
         Args:
             message_ids: List of message IDs to delete
-            permanent: Reserved; currently a no-op. Mail.app's AppleScript
-                dictionary exposes no path to permanent-delete that bypasses
-                Trash — see issue #111. Passing True emits a
-                DeprecationWarning so callers see the discrepancy clearly
-                rather than silently relying on absent behavior.
+            permanent: Permanently remove the exact messages with scoped IMAP
+                UID EXPUNGE. Requires both ``account`` and ``source_mailbox``,
+                configured IMAP credentials, and UIDPLUS support. No
+                AppleScript fallback is allowed because it would silently
+                degrade permanent deletion into a move to Trash.
             skip_bulk_check: If False, enforce bulk operation limits
             account: Optional account name (or UUID); see `source_mailbox`.
             source_mailbox: Optional source mailbox name. When provided
@@ -4459,7 +4472,7 @@ class AppleMailConnector:
                 Either alone raises ValueError.
 
         Returns:
-            Number of messages deleted (moved to Trash)
+            Number of messages deleted.
 
         Raises:
             ValueError: If bulk check fails, or if exactly one of
@@ -4468,31 +4481,34 @@ class AppleMailConnector:
         if not message_ids:
             return 0
 
-        # `permanent` was originally meant to bypass Trash, but empirical
-        # probing of Mail.app's AppleScript surface (issue #111) found no
-        # primitive that can permanently-delete:
-        #   - `delete msg` always moves to the account's Trash
-        #   - A second `delete` on a trashed message is a no-op
-        #   - There is no `empty trash` command in the dictionary
-        # Until / unless that changes, the parameter is reserved. Surface
-        # the gap loudly so MCP clients don't quietly trust a ghost knob.
-        if permanent:
-            warnings.warn(
-                "delete_messages(permanent=True) currently behaves "
-                "identically to permanent=False; Mail.app's AppleScript "
-                "dictionary does not expose a way to bypass Trash. "
-                "Messages are moved to the account's Trash mailbox in "
-                "both cases. See issue #111.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         # Safety check for bulk operations
         if not skip_bulk_check and len(message_ids) > 100:
             raise ValueError(
                 f"Too many messages for bulk delete ({len(message_ids)}). "
                 "Maximum is 100 without skip_bulk_check=True"
             )
+
+        if permanent:
+            if account is None or source_mailbox is None:
+                raise ValueError("permanent deletion requires both account and source_mailbox")
+            rfc_message_ids = self._resolve_permanent_delete_message_ids(
+                message_ids,
+                account=account,
+                source_mailbox=source_mailbox,
+            )
+            if not rfc_message_ids:
+                return 0
+            try:
+                return self._permanently_delete_imap_messages(
+                    account=account,
+                    mailbox=source_mailbox,
+                    rfc_message_ids=rfc_message_ids,
+                )
+            except _IMAP_FALLBACK_EXCS as exc:
+                raise MailImapRequiredError(
+                    "permanent deletion requires working IMAP credentials and "
+                    f"UIDPLUS support for account {account!r}: {exc}"
+                ) from exc
 
         # IMAP fast path (#150). Requires account + source_mailbox —
         # without source_mailbox, IMAP would have to SEARCH every
@@ -4533,6 +4549,50 @@ class AppleMailConnector:
 
         result = self._run_applescript(script)
         return int(result) if result.isdigit() else 0
+
+    def _resolve_permanent_delete_message_ids(
+        self,
+        message_ids: list[str],
+        *,
+        account: str,
+        source_mailbox: str,
+    ) -> list[str]:
+        """Resolve Mail numeric ids to RFC Message-IDs in one scoped pass."""
+        resolved = [message_id for message_id in message_ids if not message_id.isdigit()]
+        numeric_ids = [message_id for message_id in message_ids if message_id.isdigit()]
+        if not numeric_ids:
+            return list(dict.fromkeys(resolved))
+
+        id_list = ", ".join(
+            f'"{escape_applescript_string(sanitize_input(message_id))}"'
+            for message_id in numeric_ids
+        )
+        repeat_block = _bulk_repeat_block(
+            account=account,
+            source_mailbox=source_mailbox,
+            actions=[
+                "set rfcId to message id of msg",
+                'if rfcId is not missing value and rfcId is not "" then set end of resultData to rfcId',
+            ],
+            counter_var="resolveCount",
+        )
+        tell_body = f"""
+        tell application "Mail"
+            set resultData to {{}}
+            set idList to {{{id_list}}}
+            set resolveCount to 0
+
+{repeat_block}
+        end tell
+        """
+        script = _wrap_as_json_script(
+            tell_body,
+            timeout=self.timeout,
+            handlers=_MAILBOX_RESOLVER_HANDLERS,
+        )
+        payload = parse_applescript_json(self._run_applescript(script))
+        resolved.extend(str(message_id) for message_id in cast("list[object]", payload))
+        return list(dict.fromkeys(resolved))
 
     def get_selected_messages(
         self,

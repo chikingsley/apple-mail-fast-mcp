@@ -2399,18 +2399,16 @@ async def delete_messages(
     ctx: Context | None = None,
 ) -> dict[str, Any] | InputRequiredResult:
     """
-    Delete messages (always moves to the account's Trash mailbox).
+    Delete messages by moving them to Trash or permanently expunging them.
 
     Destructive: gated behind user confirmation via MCP elicitation
     (issue #239), matching delete_rule / delete_mailbox / delete_template.
 
     Args:
         message_ids: List of message IDs to delete
-        permanent: Reserved; currently a no-op. Mail.app's AppleScript
-            dictionary exposes no path to permanent-delete that bypasses
-            Trash (issue #111). Passing True emits a DeprecationWarning;
-            messages still go to Trash. Recoverable from the account's
-            Trash mailbox until that mailbox is emptied.
+        permanent: Permanently expunge the exact messages via scoped IMAP.
+            Requires ``account`` and ``source_mailbox`` plus configured IMAP
+            credentials and UIDPLUS support. This operation cannot be undone.
         account: Optional account name (or UUID) the messages live in.
             Must be provided together with `source_mailbox`. When both
             are given, the operation is much faster.
@@ -2428,8 +2426,8 @@ async def delete_messages(
 
     Note:
         Bulk deletions are limited to 100 messages for safety.
-        All deletes are recoverable from Trash; there is currently no
-        AppleScript path to bypass it. See issue #111.
+        Non-permanent deletes are recoverable from Trash. Permanent deletes
+        are exact UID-scoped expunges and cannot be recovered.
     """
     try:
         if not message_ids:
@@ -2437,6 +2435,13 @@ async def delete_messages(
                 "success": True,
                 "count": 0,
                 "message": "No messages to delete",
+            }
+
+        if permanent and (account is None or source_mailbox is None):
+            return {
+                "success": False,
+                "error": "permanent deletion requires both account and source_mailbox",
+                "error_type": "validation_error",
             }
 
         # Test-mode safety: when account is provided, gate the delete
@@ -2467,8 +2472,13 @@ async def delete_messages(
             f"{account}/{source_mailbox}" if account and source_mailbox else "across all mailboxes"
         )
         summary = (
-            f"Move {len(message_ids)} message(s) to Trash from {location}?\n\n"
-            f"Recoverable from the account's Trash until that mailbox is emptied."
+            f"Permanently delete {len(message_ids)} message(s) from {location}?\n\n"
+            "This cannot be undone."
+            if permanent
+            else (
+                f"Move {len(message_ids)} message(s) to Trash from {location}?\n\n"
+                "Recoverable from the account's Trash until that mailbox is emptied."
+            )
         )
         cancel_err = await _elicit_confirmation(
             ctx,
@@ -2525,6 +2535,13 @@ async def delete_messages(
             "success": False,
             "error": str(e),
             "error_type": "message_not_found",
+        }
+    except MailImapRequiredError as e:
+        logger.error("Permanent deletion requires IMAP: %s", e)
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "imap_required",
         }
     except Exception as e:
         logger.error("Error deleting messages: %s", e)

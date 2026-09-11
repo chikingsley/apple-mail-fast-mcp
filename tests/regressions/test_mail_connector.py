@@ -6,7 +6,6 @@ import socket
 import struct
 import tempfile
 import threading
-import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -17,6 +16,7 @@ from apple_mail_mcp.exceptions import (
     MailAccountNotFoundError,
     MailAppleScriptError,
     MailDraftNotFoundError,
+    MailImapRequiredError,
     MailKeychainEntryNotFoundError,
     MailMailboxNotFoundError,
     MailMessageNotFoundError,
@@ -792,29 +792,47 @@ class TestBulkOpsSourceMailbox:
     # ------ delete_messages ------
 
     @patch.object(AppleMailConnector, "_run_applescript")
-    def test_delete_messages_permanent_emits_deprecation_warning(
+    def test_delete_messages_permanent_requires_scoped_imap(
         self, mock_run: MagicMock, connector: AppleMailConnector
     ) -> None:
-        """Issue #111: Mail.app exposes no AppleScript path to bypass Trash.
-        `permanent=True` is a no-op; warn so callers don't silently rely on
-        absent behavior.
-        """
-        # Skip the #150 IMAP fast path so the AppleScript narrow path runs.
-        connector._imap_failure_until["iCloud"] = time.monotonic() + 60
-        mock_run.return_value = "1"
-        with pytest.warns(DeprecationWarning, match="#111"):
-            connector.delete_messages(
+        """Issue #111: no AppleScript fallback may fake permanent deletion."""
+        with patch.object(
+            connector, "_permanently_delete_imap_messages", return_value=1
+        ) as permanent_delete:
+            result = connector.delete_messages(
                 ["abc"],
                 permanent=True,
                 account="iCloud",
                 source_mailbox="Junk",
             )
-        # Script shape unchanged from the non-permanent path: `delete msg`
-        # always moves to the account's Trash mailbox today.
-        script = mock_run.call_args[0][0]
-        assert 'set sourceMb to my resolveMailbox(account "iCloud", "Junk")' in script
-        assert "delete msg" in script
-        assert "repeat with acc in accounts" not in script
+        assert result == 1
+        mock_run.assert_not_called()
+        permanent_delete.assert_called_once_with(
+            account="iCloud",
+            mailbox="Junk",
+            rfc_message_ids=["abc"],
+        )
+
+    @patch.object(AppleMailConnector, "_run_applescript")
+    def test_delete_messages_permanent_never_falls_back_to_applescript(
+        self, mock_run: MagicMock, connector: AppleMailConnector
+    ) -> None:
+        """Issue #111: an unavailable IMAP path must fail instead of moving to Trash."""
+        with (
+            patch.object(
+                connector,
+                "_permanently_delete_imap_messages",
+                side_effect=MailKeychainEntryNotFoundError("missing"),
+            ),
+            pytest.raises(MailImapRequiredError, match="UIDPLUS"),
+        ):
+            connector.delete_messages(
+                ["rfc@example.test"],
+                permanent=True,
+                account="iCloud",
+                source_mailbox="Deleted Items",
+            )
+        mock_run.assert_not_called()
 
 
 def _raw_with_attachments(atts: list[tuple[str, str, bytes]]) -> bytes:

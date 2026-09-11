@@ -16,17 +16,25 @@ class TestDeleteMessages:
         return AppleMailConnector(timeout=30)
 
     @patch.object(AppleMailConnector, "_run_applescript")
-    def test_permanent_delete_warns_and_still_returns_count(
+    def test_permanent_delete_uses_scoped_imap_expunge(
         self, mock_run: MagicMock, connector: AppleMailConnector
     ) -> None:
-        """Issue #111: permanent=True emits a DeprecationWarning since
-        Mail.app exposes no AppleScript path that actually bypasses Trash.
-        The call still succeeds (messages are moved to Trash like the
-        default path) and returns the count.
-        """
-        mock_run.return_value = "1"
+        """Issue #111: permanent=True must perform a real scoped expunge."""
+        mock_run.return_value = '["rfc@example.test"]'
 
-        with pytest.warns(DeprecationWarning, match="#111"):
-            result = connector.delete_messages(message_ids=["12345"], permanent=True)
+        with patch.object(
+            connector, "_permanently_delete_imap_messages", return_value=1
+        ) as permanent_delete:
+            result = connector.delete_messages(
+                message_ids=["12345"],
+                permanent=True,
+                account="Gmail",
+                source_mailbox="[Gmail]/Trash",
+            )
 
         assert result == 1
+        permanent_delete.assert_called_once_with(
+            account="Gmail",
+            mailbox="[Gmail]/Trash",
+            rfc_message_ids=["rfc@example.test"],
+        )

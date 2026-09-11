@@ -918,12 +918,12 @@ delete_messages(
 
 **Note on `permanent`:**
 
-Mail.app's AppleScript dictionary exposes no path to permanent-delete that bypasses Trash. Calling `delete msg` always moves to the account's Trash; calling `delete` again on a message already in Trash is a no-op, and there is no `empty trash` command. The `permanent` parameter is preserved for API compatibility but currently has no effect; passing `True` raises a `DeprecationWarning` so the gap is visible. Track #111 for status.
+Mail.app's AppleScript dictionary exposes no path to permanent-delete that bypasses Trash. When `permanent=False`, deletion therefore moves messages to Trash. When `permanent=True`, callers must provide both `account` and `source_mailbox`; the connector resolves any numeric Mail ids to RFC Message-IDs and performs an exact IMAP `UID STORE +FLAGS (\\Deleted)` plus `UID EXPUNGE`. This requires configured IMAP credentials and UIDPLUS support, never falls back to AppleScript, and cannot be undone.
 
 **Safety Notes:**
 
 - Bulk deletions limited to 100 messages for safety
-- All deletes are recoverable from the account's Trash mailbox until that mailbox is emptied (typically by Mail.app's per-account "empty trash" schedule, configurable in Mail's preferences)
+- Non-permanent deletes are recoverable from the account's Trash mailbox until it is emptied. Permanent deletes are exact UID-scoped expunges and are unrecoverable.
 
 ______________________________________________________________________
 

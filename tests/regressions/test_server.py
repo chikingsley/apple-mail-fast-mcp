@@ -19,6 +19,7 @@ from fastmcp.server.elicitation import (
     DeclinedElicitation,
 )
 
+from apple_mail_mcp.exceptions import MailImapRequiredError
 from apple_mail_mcp.server import (
     _elicit_confirmation,
     create_rule,
@@ -524,24 +525,55 @@ class TestDeleteMessages:
     async def test_permanent_true_threads_through_to_connector(
         self, mock_mail: MagicMock, mock_ctx_accept: MagicMock
     ) -> None:
-        """Issue #111: the connector emits a DeprecationWarning when
-        permanent=True; the server's job is just to forward the flag
-        unchanged so the warning fires from the user's call frame.
-        """
+        """Issue #111: permanent deletion is scoped and forwarded exactly."""
         mock_mail.delete_messages.return_value = 1
-        result = await delete_messages(["1"], permanent=True, ctx=mock_ctx_accept)
+        result = await delete_messages(
+            ["1"],
+            permanent=True,
+            account="Gmail",
+            source_mailbox="[Gmail]/Trash",
+            ctx=mock_ctx_accept,
+        )
         assert isinstance(result, dict)
         assert result["success"] is True
-        # Server still echoes the (now-meaningless) flag in its response
-        # for backwards compatibility with existing callers.
         assert result["permanent"] is True
         mock_mail.delete_messages.assert_called_once_with(
             message_ids=["1"],
             permanent=True,
             skip_bulk_check=False,
-            account=None,
-            source_mailbox=None,
+            account="Gmail",
+            source_mailbox="[Gmail]/Trash",
         )
+
+    @pytest.mark.asyncio
+    async def test_permanent_delete_requires_scope_before_confirmation(
+        self, mock_mail: MagicMock, mock_ctx_accept: MagicMock
+    ) -> None:
+        """Issue #111: never offer an unscoped permanent delete."""
+        result = await delete_messages(["1"], permanent=True, ctx=mock_ctx_accept)
+        assert isinstance(result, dict)
+        assert result["success"] is False
+        assert result["error_type"] == "validation_error"
+        mock_ctx_accept.elicit.assert_not_awaited()
+        mock_mail.delete_messages.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_permanent_delete_reports_imap_requirement(
+        self, mock_mail: MagicMock, mock_ctx_accept: MagicMock
+    ) -> None:
+        """Issue #111: permanent-delete capability failures stay explicit."""
+        mock_mail.delete_messages.side_effect = MailImapRequiredError("UIDPLUS required")
+        result = await delete_messages(
+            ["rfc@example.test"],
+            permanent=True,
+            account="Gmail",
+            source_mailbox="[Gmail]/Trash",
+            ctx=mock_ctx_accept,
+        )
+        assert isinstance(result, dict)
+        assert result["success"] is False
+        assert result["error_type"] == "imap_required"
+        assert "UIDPLUS" in result["error"]
 
 
 # ---------------------------------------------------------------------------
