@@ -39,6 +39,7 @@ from .exceptions import (
     MailAppleScriptError,
     MailAttachmentIndexError,
     MailAttachmentTooLargeError,
+    MailDraftFidelityError,
     MailDraftHtmlUnavailableError,
     MailDraftNotFoundError,
     MailImapMoveUnsupportedError,
@@ -1357,7 +1358,13 @@ class AppleMailConnector:
             repeat with i from 1 to ruleCount
                 set r to rule i
                 set actionRecord to {|mark_read|:(mark read of r), |mark_flagged|:(mark flagged of r), |mark_flag_index|:(mark flag index of r), |delete_message|:(delete message of r), |should_move_message|:(should move message of r), |should_copy_message|:(should copy message of r), |forward_message|:(forward message of r)}
-                set ruleRecord to {|index|:i, |name|:(name of r), |enabled|:(enabled of r), |actions|:actionRecord}
+                set conditionData to {}
+                repeat with criterion in rule conditions of r
+                    set end of conditionData to {|field|:(rule type of criterion as text), |operator|:(qualifier of criterion as text), |value|:(expression of criterion), |header_name|:(header of criterion)}
+                end repeat
+                set matchLogic to "any"
+                if all conditions must be met of r then set matchLogic to "all"
+                set ruleRecord to {|index|:i, |name|:(name of r), |enabled|:(enabled of r), |actions|:actionRecord, |conditions|:conditionData, |match_logic|:matchLogic}
                 set end of resultData to ruleRecord
             end repeat
         end tell
@@ -1539,27 +1546,32 @@ class AppleMailConnector:
             rule_type = _RULE_FIELD_MAP[cond["field"]]
             qualifier = _RULE_OPERATOR_MAP[cond["operator"]]
             expr_safe = escape_applescript_string(sanitize_input(cond["value"]))
+            # Mail resets the qualifier when setting the rule type. Assign in
+            # order, not in an unordered properties record (September 14 bug).
+            condition_lines.extend(
+                [
+                    "set criterion to make new rule condition at end of rule conditions of newRule",
+                    f"set rule type of criterion to {rule_type}",
+                ]
+            )
             if cond["field"] == "header_name":
                 header_safe = escape_applescript_string(sanitize_input(cond["header_name"]))
-                condition_lines.append(
-                    f"make new rule condition with properties "
-                    f"{{rule type:{rule_type}, qualifier:{qualifier}, "
-                    f'expression:"{expr_safe}", header:"{header_safe}"}} '
-                    f"at end of rule conditions of newRule"
-                )
-            else:
-                condition_lines.append(
-                    f"make new rule condition with properties "
-                    f"{{rule type:{rule_type}, qualifier:{qualifier}, "
-                    f'expression:"{expr_safe}"}} '
-                    f"at end of rule conditions of newRule"
-                )
+                condition_lines.append(f'set header of criterion to "{header_safe}"')
+            condition_lines.extend(
+                [
+                    f'set expression of criterion to "{expr_safe}"',
+                    f"set qualifier of criterion to {qualifier}",
+                    f'if rule type of criterion is not {rule_type} then error "RULE_TYPE_VERIFICATION_FAILED"',
+                    f'if qualifier of criterion is not {qualifier} then error "RULE_OPERATOR_VERIFICATION_FAILED"',
+                    f'if expression of criterion is not "{expr_safe}" then error "RULE_EXPRESSION_VERIFICATION_FAILED"',
+                ]
+            )
 
         action_lines = self._build_action_lines(actions)
 
         body = (
             f"set newRule to make new rule with properties "
-            f'{{name:"{name_safe}"}}\n'
+            f'{{name:"{name_safe}", enabled:false}}\n'
             f"set all conditions must be met of newRule to {all_conditions}\n"
             + "\n".join(condition_lines)
             + "\n"
@@ -5034,7 +5046,7 @@ class AppleMailConnector:
                 f'{{subject:"{subject_safe}", content:"{body_safe}", visible:false}}'
             )
         if seed == "reply":
-            verb = "reply to all" if reply_all else "reply"
+            verb = "reply"
         else:  # forward
             verb = "forward"
         return f"""
@@ -5051,7 +5063,7 @@ class AppleMailConnector:
                 if origMsg is not missing value then exit repeat
             end repeat
             if origMsg is missing value then error "SEED_NOT_FOUND"
-            set theMessage to {verb} origMsg opening window false
+            set theMessage to {verb} origMsg opening window false {"reply to all true" if seed == "reply" and reply_all else ""}
         """
 
     def _create_draft_via_imap(
@@ -6011,15 +6023,16 @@ class AppleMailConnector:
             raise MailDraftHtmlUnavailableError(
                 "HTML drafts require IMAP credentials"
                 + (f" for account {effective_account!r}" if effective_account else "")
-                + ". Opt in to Keychain IMAP access (see docs) or omit "
-                "body_html to create a plain-text draft."
+                + ". Configure IMAP or use native mail_defaults composition."
             )
 
-        # Committed to the AppleScript path, which carries Mail.app's
-        # cite-blockquote wrapper (FB11734014). Warn save-as-draft callers
-        # so a silently-wrapped draft is visible and actionable. (#270)
-        if not send_now and on_warning is not None:
-            on_warning(self._draft_fallback_warning(effective_account))
+        if not send_now:
+            raise MailDraftFidelityError(
+                "Custom draft creation requires working IMAP. The AppleScript "
+                "fallback corrupts authored text and quoted history and is disabled. "
+                "No draft was created. Use mail_defaults after restoring the resident "
+                "helper's Accessibility authorization, or configure IMAP."
+            )
 
         # If the caller handed us an RFC 5322 Message-ID (the form read
         # tools emit on the IMAP path per #148), resolve to Mail's
@@ -6086,45 +6099,10 @@ class AppleMailConnector:
             body_safe,
         )
 
-        # Terminal block: save (with id-bridging diff) or send.
-        if send_now:
-            terminal_block = """
-                tell theMessage to send
-                return "SENT"
-            """
-        else:
-            terminal_block = """
-                save theMessage
-                delay 0.5
-
-                set newDraftId to ""
-                try
-                    repeat with d in messages of drafts mailbox
-                        set candId to (id of d as text)
-                        if candId is not in beforeIds then
-                            set newDraftId to candId
-                            exit repeat
-                        end if
-                    end repeat
-                end try
-                return newDraftId
-            """
-
-        # Pre-save snapshot for id diffing (only when saving as draft).
-        snapshot_block = ""
-        if not send_now:
-            snapshot_block = """
-                set beforeIds to {}
-                try
-                    repeat with d in messages of drafts mailbox
-                        copy (id of d as text) to end of beforeIds
-                    end repeat
-                end try
-            """
+        terminal_block = 'tell theMessage to send\nreturn "SENT"'
 
         script = _wrap_with_timeout(
             f"""tell application "Mail"
-            {snapshot_block}
 
             {creation_block}
 
@@ -6142,19 +6120,13 @@ class AppleMailConnector:
         )
 
         try:
-            result = self._run_applescript(script).strip()
+            self._run_applescript(script)
         except MailAppleScriptError as e:
             if "SEED_NOT_FOUND" in str(e):
                 raise MailMessageNotFoundError(f"no message with id {seed_id!r}") from e
             raise
 
-        if send_now:
-            return {"draft_id": "", "sent_message_id": "", "from_account": ""}
-        return {
-            "draft_id": result,
-            "sent_message_id": "",
-            "from_account": effective_account or "",
-        }
+        return {"draft_id": "", "sent_message_id": "", "from_account": ""}
 
     def _sync_account_drafts(self, account: str | None) -> None:
         """Best-effort: poke Mail.app to synchronize ``account`` so a
@@ -6175,28 +6147,6 @@ class AppleMailConnector:
             self._run_applescript(script)
         except Exception as exc:
             logger.debug("post-APPEND Drafts sync failed for %r: %s", account, exc)
-
-    @staticmethod
-    def _draft_fallback_warning(effective_account: str | None) -> str:
-        """Build the #270 warning shown when a save-as-draft lands on the
-        AppleScript path (and thus the cite-blockquote wrapper, FB11734014)
-        instead of the clean IMAP path.
-        """
-        tail = "Body may render as a blockquote on iOS Mail (Mail.app bug FB11734014)."
-        if effective_account is None:
-            return (
-                "Draft created via AppleScript: no from_account was given "
-                "and there isn't exactly one enabled account, so the clean "
-                f"IMAP draft path couldn't be auto-selected. {tail} Pass "
-                "from_account, or set up IMAP with `apple-mail-fast-mcp "
-                "setup-imap`."
-            )
-        return (
-            "Draft created via AppleScript fallback: the IMAP draft path is "
-            f"unavailable for {effective_account!r} (IMAP not configured, "
-            f"unreachable, or a non-RFC reply seed). {tail} Configure or "
-            "repair IMAP for the account with `apple-mail-fast-mcp setup-imap`."
-        )
 
     def _effective_from_account(self, from_account: str | None, send_now: bool) -> str | None:
         """Resolve the account create_draft should act under (#321).

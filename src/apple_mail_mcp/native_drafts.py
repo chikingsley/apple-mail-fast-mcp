@@ -12,6 +12,7 @@ import threading
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 
+from .draft_inspection import inspect_message_source
 from .utils import applescript_account_clause, escape_applescript_string, sanitize_input
 
 if TYPE_CHECKING:
@@ -80,14 +81,14 @@ def creation_script(
             )
         field = "id" if seed_id.isdecimal() else "message id"
         identifier = seed_id if seed_id.isdecimal() else _quoted(seed_id.strip("<>"))
-        verb = "reply to all" if reply_all else "reply"
+        verb = "reply"
         if seed == "forward":
             verb = "forward"
         creation = f"""
         set seedBox to my resolveMailbox(targetAccount, {_quoted(seed_mailbox)})
         set originalMessage to first message of seedBox whose {field} is {identifier}
         set parentMessageId to message id of originalMessage
-        set d to {verb} originalMessage opening window true
+        set d to {verb} originalMessage opening window true {"reply to all true" if seed == "reply" and reply_all else ""}
         """
     subject_override = ""
     if seed != "new" and subject is not None:
@@ -132,6 +133,7 @@ def _save_script(composer_id: str, before_ids: list[str], body: str, account: st
         set beforeIds to {{{previous}}}
         set targetAccount to {applescript_account_clause(account)}
         set matches to {{}}
+        set savedSource to ""
         repeat with savedDraft in messages of drafts mailbox
             set candidateId to id of savedDraft as text
             if candidateId is not in beforeIds then
@@ -139,12 +141,16 @@ def _save_script(composer_id: str, before_ids: list[str], body: str, account: st
                     if (subject of savedDraft) is (subject of d) and (extract address from sender of savedDraft) is (extract address from sender of d) then
                         if (content of savedDraft as text) starts with {_quoted(body)} then
                             set end of matches to candidateId
+                            set candidateSource to source of savedDraft
+                            if candidateSource is not missing value then
+                                if (count characters of candidateSource) <= 4000000 then set savedSource to candidateSource
+                            end if
                         end if
                     end if
                 end if
             end if
         end repeat
-        set resultData to {{|candidate_ids|:matches}}
+        set resultData to {{|candidate_ids|:matches, |source|:savedSource}}
     end tell""")
 
 
@@ -229,6 +235,26 @@ def create_native_draft(
                     composer_id=composer_id,
                 )
             draft_id = str(matches[0])
+            inspection = inspect_message_source(
+                str(saved.get("source", "")),
+                expected_parent_rfc_id=created.get("parent_message_id") or None,
+                expected_body=body or None,
+            )
+            verification = inspection.get("verification", {})
+            required_checks = (["authored_body"] if body else []) + (
+                ["reply_linkage"] if created.get("parent_message_id") else []
+            )
+            if not inspection.get("success") or any(
+                verification.get("checks", {}).get(check, {}).get("status") != "passed"
+                for check in required_checks
+            ):
+                raise NativeDraftError(
+                    "DRAFT_VERIFICATION_FAILED: saved MIME did not verify authored text "
+                    "outside the quotation and the expected reply headers. The draft "
+                    "exists but is not ready; inspect it before retrying.",
+                    composer_id=composer_id,
+                    draft_id=draft_id,
+                )
             return {
                 "draft_id": draft_id,
                 "sent_message_id": "",
@@ -238,7 +264,8 @@ def create_native_draft(
                 "parent_message_id": created["parent_message_id"],
                 "subject": created["subject"],
                 "native_evidence": evidence,
-                "verification_status": "saved_mime_inspection_required",
+                "verification_status": "body_and_reply_headers_verified",
+                "verification": verification,
             }
         except NativeDraftError:
             raise

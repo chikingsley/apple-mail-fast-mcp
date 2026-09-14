@@ -142,6 +142,10 @@ class MailDraftNotFoundError(MailDraftError):
     """
 
 
+class MailDraftFidelityError(MailDraftError):
+    """Draft transport cannot preserve authored text and quoted history."""
+
+
 class MailDraftHtmlUnavailableError(MailDraftError):
     """An HTML draft (``body_html``) was requested but the clean IMAP-APPEND
     path could not run (no Keychain opt-in / IMAP credentials, breaker open,

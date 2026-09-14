@@ -1064,6 +1064,7 @@ class TestCreateDraft:
             seed="reply",
             seed_id="abc-123@example.com",  # RFC form (contains '@')
             body="thanks",
+            send_now=True,
         )
         mock_resolve.assert_called_once_with("abc-123@example.com")
         script = mock_run.call_args[0][0]
@@ -1087,6 +1088,7 @@ class TestCreateDraft:
             seed_id="abc-123@example.com",
             to=["x@example.com"],
             body="fyi",
+            send_now=True,
         )
         mock_resolve.assert_called_once_with("abc-123@example.com")
         script = mock_run.call_args[0][0]
@@ -1108,6 +1110,7 @@ class TestCreateDraft:
             seed="reply",
             seed_id="160989",  # internal id form, no '@'
             body="thanks",
+            send_now=True,
         )
         mock_resolve.assert_not_called()
         script = mock_run.call_args[0][0]
@@ -1136,6 +1139,7 @@ class TestCreateDraft:
                 seed="reply",
                 seed_id="missing@example.com",
                 body="x",
+                send_now=True,
             )
         # AppleScript should not run if we can't resolve the seed.
         mock_run.assert_not_called()

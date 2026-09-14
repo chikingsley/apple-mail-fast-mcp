@@ -1028,15 +1028,15 @@ ______________________________________________________________________
 
 Read the saved MIME of a draft or sent message from an exact account and mailbox. This is read-only and never sends or rewrites mail.
 
-| Parameter | Required | Meaning |
-| --- | --- | --- |
-| `message_id` | Yes | Saved Mail message ID from the creation or search result. |
-| `account` | Yes | Exact Mail account name or UUID. |
-| `mailbox` | No | Exact path; defaults to `Drafts`. Use `Sent Items` or the actual account path to compare a prior sent message. |
-| `max_chars` | No | Returned text/HTML budget, default 16000; each truncation is reported. |
-| `expected_parent_rfc_id` | No | Expected original RFC Message-ID to compare against saved `In-Reply-To`. |
-| `expected_body` | No | Reply text expected outside quoted and signature HTML regions. |
-| `expected_signature` | No | Signature text expected in a nonquoted AppleMailSignature or Outlook Signature region. |
+| Parameter                | Required | Meaning                                                                                                        |
+| ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------- |
+| `message_id`             | Yes      | Saved Mail message ID from the creation or search result.                                                      |
+| `account`                | Yes      | Exact Mail account name or UUID.                                                                               |
+| `mailbox`                | No       | Exact path; defaults to `Drafts`. Use `Sent Items` or the actual account path to compare a prior sent message. |
+| `max_chars`              | No       | Returned text/HTML budget, default 16000; each truncation is reported.                                         |
+| `expected_parent_rfc_id` | No       | Expected original RFC Message-ID to compare against saved `In-Reply-To`.                                       |
+| `expected_body`          | No       | Reply text expected outside quoted and signature HTML regions.                                                 |
+| `expected_signature`     | No       | Signature text expected in a nonquoted AppleMailSignature or Outlook Signature region.                         |
 
 The result exposes From/To/Cc/Bcc, subject and threading headers, MIME parts, bounded plain text and HTML, authored/quoted/signature regions, inline font declarations, and explicit checks. A `Re:` subject alone cannot pass the reply-linkage check. Finding reply text or a signature only inside quoted history cannot pass the corresponding authored/signature check. Plain text alone cannot prove HTML layout. Missing source, parse/size limits, and unrequested checks are reported as incomplete or unavailable; the result never claims that Mail's rendered UI or conversation grouping was inspected.
 
@@ -1048,17 +1048,17 @@ Update a supported plain fresh draft by creating its replacement before discardi
 
 **Parameters:**
 
-| Parameter                         | Type            | Required | Default | Description                                                                                                                                                                                                                                                                                                                                   |
-| --------------------------------- | --------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `draft_id`                        | string          | Yes      | -       | Mail.app id of the existing draft.                                                                                                                                                                                                                                                                                                            |
-| `to` / `cc` / `bcc`               | array[string]   | No       | None    | Override recipient groups: `None` keeps existing, `[]` clears, populated list replaces.                                                                                                                                                                                                                                                       |
-| `subject`                         | string          | No       | None    | Override subject. `None` keeps existing.                                                                                                                                                                                                                                                                                                      |
-| `body`                            | string          | No       | None    | Override body. `None` keeps existing; non-None replaces (including `""`).                                                                                                                                                                                                                                                                     |
-| `body_html` | string | No | None | Explicit custom HTML for supported fresh drafts only. Existing rich/native/reply drafts are protected from lossy reconstruction and return `native_update_required`; their HTML is not silently dropped. |
-| `attachment_paths`                | array[string]   | No       | None    | Override attachments: `None` **preserves existing** (extracted to a temp dir and re-attached); `[]` clears; populated list replaces.                                                                                                                                                                                                          |
-| `template_name` / `template_vars` | string / object | No       | None    | Optional template render. User-supplied `subject`/`body` override the rendered output.                                                                                                                                                                                                                                                        |
-| `from_account`                    | string          | No       | None    | Override sender.                                                                                                                                                                                                                                                                                                                              |
-| `send_now`                        | boolean         | No       | False   | `False` saves new draft. `True` sends after eliciting confirmation.                                                                                                                                                                                                                                                                           |
+| Parameter                         | Type            | Required | Default | Description                                                                                                                                                                                              |
+| --------------------------------- | --------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `draft_id`                        | string          | Yes      | -       | Mail.app id of the existing draft.                                                                                                                                                                       |
+| `to` / `cc` / `bcc`               | array[string]   | No       | None    | Override recipient groups: `None` keeps existing, `[]` clears, populated list replaces.                                                                                                                  |
+| `subject`                         | string          | No       | None    | Override subject. `None` keeps existing.                                                                                                                                                                 |
+| `body`                            | string          | No       | None    | Override body. `None` keeps existing; non-None replaces (including `""`).                                                                                                                                |
+| `body_html`                       | string          | No       | None    | Explicit custom HTML for supported fresh drafts only. Existing rich/native/reply drafts are protected from lossy reconstruction and return `native_update_required`; their HTML is not silently dropped. |
+| `attachment_paths`                | array[string]   | No       | None    | Override attachments: `None` **preserves existing** (extracted to a temp dir and re-attached); `[]` clears; populated list replaces.                                                                     |
+| `template_name` / `template_vars` | string / object | No       | None    | Optional template render. User-supplied `subject`/`body` override the rendered output.                                                                                                                   |
+| `from_account`                    | string          | No       | None    | Override sender.                                                                                                                                                                                         |
+| `send_now`                        | boolean         | No       | False   | `False` saves new draft. `True` sends after eliciting confirmation.                                                                                                                                      |
 
 **Returns:**
 
@@ -1431,3 +1431,11 @@ Breaking changes will only occur in major versions (1.0.0, 2.0.0, etc.).
 ### junk_status
 
 Returns the latest completed Junk cleaner cycle and cumulative observations and actions. It reads the same durable ledger as the standalone cleaner. It does not run a cleanup cycle or erase Trash.
+
+## Draft and rule verification
+
+Native draft creation verifies the saved authored text and reply headers before reporting success. A failed verification returns the existing draft and composer IDs so callers inspect that attempt instead of creating duplicates. Signature, font preferences, and rendered appearance still require inspection; the response includes the verification scope and gaps.
+
+Custom saved drafts require a working IMAP connection. The AppleScript save fallback is disabled because it can put the complete authored reply inside a quotation. An unavailable native helper is not a reason to switch a native-formatting request to custom mode.
+
+`list_rules` returns the actual native conditions and match logic as well as enabled state. Rule creation sets conditions in a defined order, verifies their values and operators, and enables the rule only after those checks. This proves stored configuration; automatic delivery or applying the rule to a real message must be tested separately.

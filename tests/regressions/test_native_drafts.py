@@ -1,6 +1,7 @@
 """Regressions for the September 10 lost quote, signature, and draft-identity incident."""
 
 import json
+from email.message import EmailMessage
 from unittest.mock import MagicMock
 
 import pytest
@@ -80,7 +81,22 @@ def test_regression_reply_preserves_native_subject_and_never_sets_entire_content
     assert "content:" not in script
 
 
-def test_regression_native_editor_bound_to_preflight_and_reports_unverified_mime():
+def _saved_mime(*, quoted=False):
+    message = EmailMessage()
+    message["In-Reply-To"] = "<parent@example.com>"
+    message["References"] = "<parent@example.com>"
+    message.set_content(_arguments()["body"])
+    body = "<div>Hi Scott,</div><div>Please confirm the product.</div>"
+    message.add_alternative(
+        f"<blockquote>{body}</blockquote>"
+        if quoted
+        else body + "<blockquote>Earlier message</blockquote>",
+        subtype="html",
+    )
+    return message.as_string()
+
+
+def test_regression_native_editor_bound_to_preflight_and_verifies_saved_mime():
     """Regression: existing same-subject composers must not become insertion targets."""
     run = MagicMock(
         side_effect=[
@@ -94,7 +110,7 @@ def test_regression_native_editor_bound_to_preflight_and_reports_unverified_mime
                 }
             ),
             json.dumps({"inserted_text_verified": True, "previous_content_preserved": True}),
-            json.dumps({"candidate_ids": ["43"]}),
+            json.dumps({"candidate_ids": ["43"], "source": _saved_mime()}),
         ]
     )
     result = create_native_draft(run, **_arguments())
@@ -102,7 +118,7 @@ def test_regression_native_editor_bound_to_preflight_and_reports_unverified_mime
     assert insertion["session_token"] == "unique-token"
     assert insertion["body"] == _arguments()["body"]
     assert result["draft_id"] == "43"
-    assert result["verification_status"] == "saved_mime_inspection_required"
+    assert result["verification_status"] == "body_and_reply_headers_verified"
     assert "id of account of mailbox of savedDraft" in run.call_args_list[3].args[0]
     assert "extract address from sender of savedDraft" in run.call_args_list[3].args[0]
 
@@ -194,3 +210,82 @@ async def test_regression_rich_update_refuses_to_flatten_original(monkeypatch, t
     assert result["error_type"] == "native_update_required"
     fake_mail.delete_draft.assert_not_called()
     fake_mail.create_draft.assert_not_called()
+
+
+def test_regression_saved_quoted_reply_is_failure_with_existing_draft_id():
+    """Regression (September 14): a saved draft is not successful when its reply is all quoted."""
+    run = MagicMock(
+        side_effect=[
+            json.dumps({"session_token": "one"}),
+            json.dumps(
+                {
+                    "composer_id": "7",
+                    "subject": "Re: test",
+                    "before_ids": [],
+                    "parent_message_id": "parent@example.com",
+                }
+            ),
+            json.dumps({"inserted_text_verified": True, "previous_content_preserved": True}),
+            json.dumps({"candidate_ids": ["43"], "source": _saved_mime(quoted=True)}),
+        ]
+    )
+    with pytest.raises(NativeDraftError, match="DRAFT_VERIFICATION_FAILED") as raised:
+        create_native_draft(run, **_arguments())
+    assert raised.value.draft_id == "43"
+    assert raised.value.composer_id == "7"
+
+
+def test_regression_custom_transport_failure_cannot_create_quoted_fallback(monkeypatch):
+    """Regression (September 14): custom mode must not silently create the known broken fallback."""
+    from apple_mail_mcp.exceptions import MailDraftFidelityError
+    from apple_mail_mcp.mail_connector import AppleMailConnector
+
+    connector = AppleMailConnector()
+    monkeypatch.setattr(connector, "_effective_from_account", lambda *args: "CICA")
+    monkeypatch.setattr(connector, "_try_clean_create_or_send", lambda **kwargs: None)
+    run = MagicMock()
+    monkeypatch.setattr(connector, "_run_applescript", run)
+    with pytest.raises(MailDraftFidelityError, match="No draft was created"):
+        connector.create_draft(
+            seed="reply", seed_id="42", body="Hello", from_account="CICA", composition_mode="custom"
+        )
+    run.assert_not_called()
+
+
+@pytest.mark.allow_real_io
+@pytest.mark.parametrize("native", [True, False])
+def test_regression_reply_all_compiles_in_mail_dictionary(native, tmp_path):
+    """Regression (September 14): 'reply to all message' was invalid in both generated paths."""
+    import shutil
+    import subprocess
+
+    from apple_mail_mcp.mail_connector import AppleMailConnector
+
+    compiler = shutil.which("osacompile")
+    if not compiler:
+        pytest.skip("AppleScript compiler is only available on macOS")
+    if native:
+        args = _arguments()
+        args.pop("body")
+        args["reply_all"] = True
+        source = creation_script(**args)
+    else:
+        source = (
+            'tell application "Mail"\n'
+            + AppleMailConnector._build_creation_block(
+                seed="reply",
+                seed_id_safe="42",
+                reply_all=True,
+                subject_safe=None,
+                body_safe="hello",
+            )
+            + "\nend tell"
+        )
+    result = subprocess.run(
+        [compiler, "-o", str(tmp_path / "reply.scpt"), "-"],
+        input=source,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

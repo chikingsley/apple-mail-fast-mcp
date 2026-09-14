@@ -32,6 +32,7 @@ from .exceptions import (
     MailAttachmentIndexError,
     MailAttachmentTooLargeError,
     MailDraftError,
+    MailDraftFidelityError,
     MailDraftHtmlUnavailableError,
     MailDraftInvalidIdError,
     MailDraftNotFoundError,
@@ -365,12 +366,11 @@ def list_rules() -> dict[str, Any]:
     """
     List all Mail.app rules (read-only).
 
-    Returns each rule's display name, enabled state, and native action
-    switches. This makes automatic state changes such as ``mark_flagged``
+    Returns each rule's display name, enabled state, native conditions,
+    match logic, and action switches. This makes automatic state changes such as ``mark_flagged``
     visible during rule audits. Rule names are NOT guaranteed unique — Mail
     allows duplicates — and rules have no stable id via AppleScript. This tool
-    is read-only; mutation (enable/disable, create, delete) is tracked as a
-    separate enhancement.
+    is read-only; use create_rule, update_rule, or delete_rule for mutations.
 
     Returns:
         Dictionary containing the rules list.
@@ -2797,6 +2797,8 @@ def _draft_error_response(e: MailDraftError) -> dict[str, Any]:
         et = "draft_not_found"
     elif isinstance(e, MailDraftInvalidIdError):
         et = "invalid_draft_id"
+    elif isinstance(e, MailDraftFidelityError):
+        et = "draft_fidelity_unavailable"
     elif isinstance(e, MailDraftHtmlUnavailableError):
         et = "html_requires_imap"
     else:
@@ -2816,10 +2818,14 @@ def _draft_action_error(op: str, e: Exception) -> dict[str, Any] | None:
         return {
             "success": False,
             "error": str(e),
-            "error_type": "native_composition_unavailable",
+            "error_type": "draft_verification_failed"
+            if "DRAFT_VERIFICATION_FAILED" in str(e)
+            else "native_composition_unavailable",
             "composer_id": e.composer_id,
             "draft_id": e.draft_id,
-            "verification_status": "unverified",
+            "verification_status": "failed"
+            if "DRAFT_VERIFICATION_FAILED" in str(e)
+            else "unverified",
             "retry_instruction": "Inspect any returned composer or draft before retrying; do not create duplicates.",
         }
     if isinstance(e, MailMessageNotFoundError):
@@ -3225,8 +3231,11 @@ async def create_draft(
             Mail's typing font. Do not add a manually reconstructed signature.
         composition_mode: mail_defaults (default) uses the native Mail editor
             and requires the signed helper's Accessibility permission. It never
-            silently downgrades. custom explicitly opts into the older IMAP/plain
+            silently downgrades. custom explicitly opts into the IMAP/plain
             composition path and does not promise Mail's signature or font.
+            Custom saved drafts require working IMAP; the corrupting AppleScript
+            save fallback is disabled. Native mode verifies authored text and reply
+            headers in the saved MIME before reporting success.
             Native mode currently saves drafts only; send_now and body_html are
             unavailable in that mode. Always inspect_draft before claiming success.
         body_html: Optional HTML body. When set, the draft is built as a
@@ -3390,6 +3399,7 @@ async def create_draft(
                 "parent_message_id": result.get("parent_message_id", ""),
                 "native_evidence": result.get("native_evidence"),
                 "verification_status": result.get("verification_status", "unverified"),
+                "verification": result.get("verification"),
             },
         }
         if warnings:
