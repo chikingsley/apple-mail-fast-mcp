@@ -98,10 +98,11 @@ if p.exists() or (home / ".claude").is_dir() or shutil.which("claude"):
         }
     save(p, json.dumps(doc, indent=2) + "\n")
     configured.append("claude")
-for p in [home / ".config/opencode/opencode.json", home / ".config/opencode/opencode.jsonc"]:
-    if not p.exists():
-        continue
-    doc = json5.loads(p.read_text(encoding="utf-8-sig"))
+opencode_paths = [p for p in [home / ".config/opencode/opencode.json", home / ".config/opencode/opencode.jsonc"] if p.exists()]
+if not opencode_paths:
+    opencode_paths = [home / ".config/opencode/opencode.json"]
+for p in opencode_paths:
+    doc = json5.loads(p.read_text(encoding="utf-8-sig")) if p.exists() else {}
     for name in names:
         doc.setdefault("mcp", {})[name] = {
             "type": "local",
@@ -169,7 +170,7 @@ for directory in [home / ".config/Code/User", home / "Library/Application Suppor
     save(p, json.dumps(doc, indent=2) + "\n")
     configured.append(str(directory.relative_to(home)))
 
-for prefix in [".agents/skills", ".codex/skills", ".claude/skills", ".kimi-code/skills", ".gemini/skills", ".copilot/skills", ".hermes/skills"]:
+for prefix in [".config/opencode/skills", ".agents/skills", ".codex/skills", ".claude/skills", ".kimi-code/skills", ".gemini/skills", ".copilot/skills", ".hermes/skills"]:
     for name in ["apple-mail", "apple-calendar", "apple-contacts", "messages"]:
         src = source.parent / "skills" / name / "SKILL.md"
         if name == "apple-calendar" and not src.exists():

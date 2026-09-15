@@ -14,6 +14,14 @@ from fastmcp import Client
 async def main():
     h = pathlib.Path.home()
     uv = shutil.which("uv") or str(h / ".local/bin" / ("uv.exe" if os.name == "nt" else "uv"))
+    opencode_path = h / ".config/opencode/opencode.json"
+    opencode = json.loads(opencode_path.read_text(encoding="utf-8-sig")) if opencode_path.exists() else None
+    if opencode is not None:
+        for skill in ["apple-mail", "apple-calendar", "apple-contacts", "messages"]:
+            installed = h / ".config/opencode/skills" / skill / "SKILL.md"
+            shared = h / ".agents/skills" / skill / "SKILL.md"
+            if not installed.exists() or installed.read_bytes() != shared.read_bytes():
+                raise RuntimeError(f"OpenCode skill missing or stale: {skill}")
     for name, operation in [("apple-mail", "list_accounts"), ("beeper", "get_accounts"), ("apple-calendar", "calendar_status"), ("apple-contacts", "list_containers")]:
         config = {
             "mcpServers": {
@@ -32,6 +40,12 @@ async def main():
         pin = h / ".config/peacockery-communications/python-path"
         if pin.exists():
             config["mcpServers"][name]["args"][1:1] = ["--python", pin.read_text().strip()]
+        if opencode is not None:
+            entry = opencode.get("mcp", {}).get(name, {})
+            command = entry.get("command", [])
+            if not entry.get("enabled") or entry.get("type") != "local" or not command:
+                raise RuntimeError(f"OpenCode MCP missing or disabled: {name}")
+            config["mcpServers"][name] = {"command": command[0], "args": command[1:]}
         t = time.monotonic()
         async with Client(config, timeout=120) as c:
             ts = await c.list_tools()
@@ -50,6 +64,8 @@ async def main():
                 json.dumps(
                     {
                         "service": name,
+                        "client": "opencode" if opencode is not None else "shared-adapter",
+                        "skills_ok": opencode is not None,
                         "tools": [x.name for x in ts],
                         "error": r.is_error,
                         "has_result": bool(r.data or r.content),
