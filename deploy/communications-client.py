@@ -15,8 +15,8 @@ from fastmcp.server import create_proxy
 
 root = Path.home() / ".config/peacockery-communications"
 service = sys.argv[1]
-if service not in {"apple-mail", "apple-calendar", "beeper"}:
-    raise SystemExit("Choose apple-mail, apple-calendar or beeper")
+if service not in {"apple-mail", "apple-calendar", "apple-contacts", "beeper"}:
+    raise SystemExit("Choose apple-mail, apple-calendar, apple-contacts or beeper")
 config = json.loads((root / "endpoints.json").read_text())
 token_path = root / "service-token"
 if token_path.is_symlink():

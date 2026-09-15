@@ -14,7 +14,7 @@ from fastmcp import Client
 async def main():
     h = pathlib.Path.home()
     uv = shutil.which("uv") or str(h / ".local/bin" / ("uv.exe" if os.name == "nt" else "uv"))
-    for name, operation in [("apple-mail", "list_accounts"), ("beeper", "get_accounts"), ("apple-calendar", "calendar_status")]:
+    for name, operation in [("apple-mail", "list_accounts"), ("beeper", "get_accounts"), ("apple-calendar", "calendar_status"), ("apple-contacts", "list_containers")]:
         config = {
             "mcpServers": {
                 name: {
@@ -44,8 +44,8 @@ async def main():
                 raise RuntimeError(f"{name}: unexpected tool catalog")
             if r.is_error or discovery.is_error or schema.is_error or not (r.data or r.content):
                 raise RuntimeError(f"{name}: discovery or read failed")
-            if name in {"apple-mail", "apple-calendar"} and not (r.data or {}).get("success"):
-                raise RuntimeError("apple-mail: account lookup returned failure")
+            if name in {"apple-mail", "apple-calendar", "apple-contacts"} and not (r.data or {}).get("success"):
+                raise RuntimeError(f"{name}: native lookup returned failure")
             print(
                 json.dumps(
                     {

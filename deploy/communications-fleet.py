@@ -76,6 +76,7 @@ def payload():
         ]:
             archive.add(ROOT / relative, arcname=relative)
         archive.add(ROOT.parent / "apple-calendar-global/skills/apple-calendar/SKILL.md", arcname="skills/apple-calendar/SKILL.md")
+        archive.add(ROOT.parent / "apple-contacts-global/skills/apple-contacts/SKILL.md", arcname="skills/apple-contacts/SKILL.md")
     return output.getvalue()
 
 

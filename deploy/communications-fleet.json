@@ -21,7 +21,8 @@
     "hoboy": {
       "platform": "windows",
       "ssh": "hoboy",
-      "user": "chiejimofor"
+      "user": "chiejimofor",
+      "python": "C:/Users/chiejimofor/AppData/Roaming/uv/python/cpython-3.14.7-windows-x86_64-none/python.exe"
     },
     "glkvm": {
       "platform": "posix",

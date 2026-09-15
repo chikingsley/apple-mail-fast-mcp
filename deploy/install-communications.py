@@ -38,6 +38,7 @@ uv = shutil.which("uv") or str(home / ".local/bin" / ("uv.exe" if os.name == "nt
 assert pathlib.Path(uv).is_file(), "uv is required"
 endpoints = json.loads((root / "endpoints.json").read_text()) if (root / "endpoints.json").exists() else {}
 endpoints.update({
+    "apple-contacts": "http://127.0.0.1:8768/mcp" if args.local_service else "https://hochi.tailbce39f.ts.net/apple-contacts/mcp",
     "apple-mail": "http://127.0.0.1:8765/mcp"
     if args.local_service
     else "https://hochi.tailbce39f.ts.net/apple-mail/mcp",
@@ -69,7 +70,7 @@ def save(path, data):
 python = str(pathlib.Path(sys._base_executable).resolve())
 save(root / "python-path", python + "\n")
 client_args = ["run", "--python", python, "--locked", "--script", str(client)]
-names = ["apple-mail", "apple-calendar", "beeper"]
+names = ["apple-mail", "apple-calendar", "apple-contacts", "beeper"]
 configured = []
 p = home / ".codex/config.toml"
 if p.exists() or (home / ".codex").is_dir() or shutil.which("codex"):
@@ -169,10 +170,12 @@ for directory in [home / ".config/Code/User", home / "Library/Application Suppor
     configured.append(str(directory.relative_to(home)))
 
 for prefix in [".agents/skills", ".codex/skills", ".claude/skills", ".kimi-code/skills", ".gemini/skills", ".copilot/skills", ".hermes/skills"]:
-    for name in ["apple-mail", "apple-calendar", "messages"]:
+    for name in ["apple-mail", "apple-calendar", "apple-contacts", "messages"]:
         src = source.parent / "skills" / name / "SKILL.md"
         if name == "apple-calendar" and not src.exists():
             src = source.parent.parent / "apple-calendar-global/skills/apple-calendar/SKILL.md"
+        if name == "apple-contacts" and not src.exists():
+            src = source.parent.parent / "apple-contacts-global/skills/apple-contacts/SKILL.md"
         p = home / prefix / name / "SKILL.md"
         save(p, src.read_text(encoding="utf-8-sig"))
 # A shell convenience command, also useful for manual MCP diagnostics.
